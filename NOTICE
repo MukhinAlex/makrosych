@@ -1,0 +1,19 @@
+Макросыч — локальное приложение для создания и запуска сценариев обработки Excel
+Copyright 2026 Мухин Александр Викторович (ИП, Воронеж)
+
+Программа распространяется по лицензии Apache License 2.0 (файл LICENSE).
+
+В состав программы входят сторонние компоненты:
+
+  PHP 8.3 — https://www.php.net/
+  Copyright (c) The PHP Group
+  Лицензия: PHP License 3.01 — runtime/php/license.txt
+  Условия распространения бинарных сборок — runtime/php/readme-redist-bins.txt
+
+  PhpSpreadsheet — https://github.com/PHPOffice/PhpSpreadsheet
+  Copyright (c) 2019-2026 PhpSpreadsheet Authors
+  Лицензия: MIT — vendor/phpoffice/phpspreadsheet/LICENSE
+
+Название «Макросыч» и страница программы mxander.ru/makrosych принадлежат автору.
+Лицензия Apache-2.0 не даёт прав на использование этого названия и бренда
+(раздел 6 лицензии).

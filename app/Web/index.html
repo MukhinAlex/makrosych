@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="app-token" content="__APP_TOKEN__">
+<title>Макросыч — обработка таблиц</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header>
+    <h1>Макросыч</h1>
+    <span class="app-subtitle">обработка таблиц Excel</span>
+    <span class="badge" id="version"></span>
+    <span class="spacer"></span>
+    <span class="storage" id="storage"></span>
+</header>
+
+<nav>
+    <button data-tab="library" class="active">Библиотека</button>
+    <button data-tab="create">Новая задача</button>
+    <button data-tab="help">Как пользоваться</button>
+    <button data-tab="settings">Настройки</button>
+    <button data-tab="about">О программе</button>
+</nav>
+
+<main>
+
+<!-- ============================= БИБЛИОТЕКА ============================= -->
+<section id="tab-library">
+    <div class="panel">
+        <h2>Готовые сценарии</h2>
+        <p class="hint">Сценарий создаётся один раз и затем запускается на новых файлах многократно — без интернета и без обращения к нейросети.</p>
+        <div class="row">
+            <input type="text" id="search" placeholder="Поиск по названию, описанию или метке">
+            <button class="ghost" id="btn-import">Загрузить сценарий из файла</button>
+            <input type="file" id="import-file" accept=".zip" class="hidden">
+        </div>
+    </div>
+
+    <div id="run-area"></div>
+    <div id="recipe-view"></div>
+
+    <div class="cards" id="recipe-cards"></div>
+    <div id="library-empty" class="panel hidden">
+        <p class="hint">Сценариев пока нет. Откройте вкладку «Новая задача», загрузите образец таблицы и опишите, что нужно сделать.</p>
+    </div>
+</section>
+
+<!-- ============================= НОВАЯ ЗАДАЧА ============================= -->
+<section id="tab-create" class="hidden">
+
+    <div class="panel">
+        <h2>Шаг 1. Файл-образец</h2>
+        <p class="hint">Загрузите таблицу, на которой будем проверять сценарий. Приложение прочитает её структуру — заголовки, колонки, типы значений.</p>
+        <input type="file" id="sample-file" accept=".xlsx,.xls,.csv">
+        <label for="lookup-file">Файл-справочник (необязательно)</label>
+        <input type="file" id="lookup-file" accept=".xlsx,.xls,.csv">
+        <p class="hint" style="margin-top:6px">Приложите второй файл, если данные нужно взять из него — например, цены из прайса по коду товара. Если всё в одном файле, оставьте поле пустым.</p>
+        <div class="actions">
+            <button class="primary" id="btn-analyze">Проанализировать файл</button>
+        </div>
+        <div id="analyze-status"></div>
+    </div>
+
+    <div class="panel hidden" id="profile-panel">
+        <h2>Структура файла</h2>
+        <div id="profile-summary"></div>
+        <details open>
+            <summary>Колонки</summary>
+            <div class="table-wrap" style="margin-top:8px"><table id="profile-columns"></table></div>
+        </details>
+        <details>
+            <summary>Примеры строк</summary>
+            <div class="table-wrap" style="margin-top:8px"><table id="profile-samples"></table></div>
+        </details>
+    </div>
+
+    <div class="panel hidden" id="lookup-panel">
+        <h2>Структура файла-справочника</h2>
+        <div id="lookup-summary"></div>
+        <details>
+            <summary>Колонки</summary>
+            <div class="table-wrap" style="margin-top:8px"><table id="lookup-columns"></table></div>
+        </details>
+        <details>
+            <summary>Примеры строк</summary>
+            <div class="table-wrap" style="margin-top:8px"><table id="lookup-samples"></table></div>
+        </details>
+    </div>
+
+    <div class="panel hidden" id="chat-panel">
+        <h2>Шаг 2. Что нужно сделать</h2>
+        <p class="hint">Опишите задачу обычными словами: какие данные взять, куда положить, что пересчитать.</p>
+        <div id="privacy-notice"></div>
+        <div class="chat" id="chat"></div>
+        <label for="prompt" id="prompt-label">Описание задачи</label>
+        <textarea id="prompt" placeholder="Например: сохрани все изображения из колонок G и H в папки по артикулу из колонки B. Ссылок в ячейке может быть несколько через точку с запятой."></textarea>
+        <div id="prompt-hint"></div>
+        <div class="actions">
+            <button class="primary" id="btn-generate">Составить сценарий</button>
+            <button class="ghost" id="btn-restart">Начать заново</button>
+        </div>
+    </div>
+
+    <div class="panel hidden" id="recipe-panel">
+        <h2>Шаг 3. Получился сценарий</h2>
+        <div id="recipe-explanation"></div>
+        <div id="recipe-validation"></div>
+        <details>
+            <summary>Показать сценарий целиком</summary>
+            <pre class="json" id="recipe-json"></pre>
+        </details>
+        <div class="actions">
+            <button class="primary" id="btn-dryrun">Проверить на образце</button>
+        </div>
+        <div id="dryrun-result"></div>
+    </div>
+
+    <div class="panel hidden" id="save-panel">
+        <h2>Шаг 4. Сохранить в библиотеку</h2>
+        <p class="hint">Сохраняйте, только если результат проверки вас устраивает. Образец и ожидаемый результат сохранятся вместе со сценарием.</p>
+        <div class="row">
+            <div>
+                <label for="save-name">Название</label>
+                <input type="text" id="save-name">
+            </div>
+            <div>
+                <label for="save-tags">Метки (через запятую)</label>
+                <input type="text" id="save-tags" placeholder="фото, артикулы">
+            </div>
+        </div>
+        <label for="save-description">Описание</label>
+        <textarea id="save-description"></textarea>
+        <div class="actions">
+            <button class="primary" id="btn-save">Сохранить сценарий</button>
+        </div>
+        <div id="save-status"></div>
+    </div>
+</section>
+
+<!-- ============================= КАК ПОЛЬЗОВАТЬСЯ ============================= -->
+<section id="tab-help" class="hidden">
+
+    <div class="panel">
+        <h2>Что делает Макросыч</h2>
+        <p class="hint">Программа делает в Excel то, что обычно делают руками: переносит данные из
+        одной таблицы в другую, собирает значения из нескольких строк в одну ячейку, скачивает
+        фотографии по ссылкам, вставляет картинки и формулы.</p>
+        <table class="kv">
+            <tr><th>Что такое сценарий</th><td>Запись однажды описанной работы: какие данные взять, что с ними сделать и куда положить. Описывается один раз, запускается сколько угодно раз.</td></tr>
+            <tr><th>Где работают данные</th><td>На вашем компьютере. Ничего никуда не отправляется — кроме фотографий, которые сценарий сам скачивает по ссылкам из вашей таблицы.</td></tr>
+            <tr><th>Нужен ли интернет</th><td>Только чтобы <b>составить</b> сценарий и чтобы скачать фотографии по ссылкам. Готовые сценарии работают без интернета.</td></tr>
+            <tr><th>Права администратора</th><td>Не нужны. Программу можно положить в любую папку, хоть на флешку.</td></tr>
+        </table>
+    </div>
+
+    <div class="panel">
+        <h2>Первый сценарий: четыре шага</h2>
+        <p class="hint">Понадобится таблица, на которой будем пробовать. Лучше взять рабочий файл, но с небольшим числом строк.</p>
+        <ol class="steps">
+            <li>Откройте вкладку <b>«Новая задача»</b>, выберите файл и нажмите <b>«Проанализировать файл»</b> — программа покажет, какие в файле колонки и какие в них данные. Если данные нужно взять из другого файла (например, цены из прайса по коду товара), приложите его в поле <b>«Файл-справочник»</b> — программа прочитает и его.</li>
+            <li>Опишите задачу обычными словами в поле <b>«Описание задачи»</b>. Например: «Собрать фотографии из колонки G в папки по артикулу из колонки B». Нажмите <b>«Составить сценарий»</b>.</li>
+            <li>Нажмите <b>«Проверить на образце»</b> — программа покажет таблицу с результатом, то есть так, как будет выглядеть готовый файл. Если что-то не так, вернитесь к описанию и уточните задачу.</li>
+            <li>Если результат подходит, введите название и нажмите <b>«Сохранить сценарий»</b>. Сценарий появится в библиотеке.</li>
+        </ol>
+        <div class="notice info"><strong>Нейросеть нужна только на этом шаге</strong>Она помогает составить сценарий по вашему описанию. Готовый сценарий работает без неё.</div>
+    </div>
+
+    <div class="panel">
+        <h2>Как запускать сценарий на новых файлах</h2>
+        <ol class="steps">
+            <li>Откройте вкладку <b>«Библиотека»</b> и найдите нужный сценарий.</li>
+            <li>Нажмите <b>«Запустить»</b> и приложите файлы: таблицу с данными и, если сценарий их использует, шаблон.</li>
+            <li>Если у сценария есть параметры (например, номер строки, с которой начинаются данные), заполните их.</li>
+            <li>Нажмите <b>«Запустить»</b> и дождитесь окончания работы. Готовые файлы скачиваются кнопкой, а все сразу — архивом.</li>
+        </ol>
+        <p class="hint">Кнопка <b>«Образец»</b> в карточке сценария показывает файл, на котором сценарий создавался: его колонки и первые строки. Файл можно скачать и открыть в Excel — удобно, чтобы вспомнить, для какой таблицы сценарий сделан.</p>
+    </div>
+
+    <div class="panel">
+        <h2>Подключение нейросети</h2>
+        <p class="hint">Заполняется один раз, на вкладке «Настройки». Нужны три вещи: адрес сервиса, название модели и ключ доступа.</p>
+        <table class="kv">
+            <tr><th>Какой сервис выбрать</th><td>Любой, который вам понравится, — лишь бы у него был API. Чаще всего берут <a href="https://routerai.ru" target="_blank" rel="noopener">RouterAI</a> (ChatGPT, Claude, Gemini и другие модели в одном месте, оплата в рублях) или <a href="https://polza.ai" target="_blank" rel="noopener">Polza.AI</a> (больше 400 моделей, пополнение картой российского банка). Подойдёт и OpenAI, и любой другой сервис с OpenAI-совместимым API.</td></tr>
+            <tr><th>Сколько это стоит</th><td>Вы платите только за токены, которые нужны для составления сценария: обычно от нескольких копеек до десятков рублей за один сценарий. Деньги списываются с баланса, который вы пополнили на сайте выбранного сервиса, — автору программы платить не нужно. Запуск готовых сценариев бесплатен: нейросеть в нём не участвует.</td></tr>
+            <tr><th>Что подготовить</th><td>Адрес API (у RouterAI это <code>https://routerai.ru/api/v1</code>), ключ доступа из личного кабинета сервиса и название модели. Нужен интернет, и часть данных образца уходит в сервис.</td></tr>
+            <tr><th>Модель на своём компьютере</th><td>LM Studio или Ollama — бесплатно, без интернета, данные не покидают компьютер. Адрес обычно <code>http://127.0.0.1:1234/v1</code>.</td></tr>
+            <tr><th>Какую модель выбрать</th><td>Берите модель без режима рассуждений — обычно в названии есть <code>instruct</code>. Модели «с рассуждениями» тратят время на размышления и часто отвечают пустым ответом.</td></tr>
+            <tr><th>Как проверить</th><td>Кнопка <b>«Проверить подключение»</b> в настройках. Рядом кнопка <b>«Список моделей»</b> — она показывает, какие модели предлагает сервис.</td></tr>
+        </table>
+        <div class="notice warn"><strong>Ключ доступа — личный</strong>Ключ хранится только на этом компьютере, не попадает в сценарии и в журналы работы. Передавать его коллегам не нужно: каждый настраивает своё подключение.</div>
+    </div>
+
+    <div class="panel">
+        <h2>Если что-то не получилось</h2>
+
+        <details>
+            <summary>Не подключается к нейросети</summary>
+            <ol class="steps">
+                <li>Проверьте адрес сервиса. Для LM Studio и Ollama он заканчивается на <code>/v1</code>, например <code>http://127.0.0.1:1234/v1</code>.</li>
+                <li>Нажмите «Список моделей». Если список пришёл — адрес и ключ верны, дело в названии модели: скопируйте его из списка.</li>
+                <li>Если написано про сертификат — соединение проверяет антивирус или прокси. Добавьте адрес сервиса в его исключения. В Kaspersky это «Настройки» → «Защита» → «Проверка защищённых соединений» → исключения.</li>
+                <li>Проверьте, что ключ скопирован целиком, без лишних пробелов в начале и в конце.</li>
+            </ol>
+        </details>
+
+        <details>
+            <summary>Модель отвечает пустым ответом или думает очень долго</summary>
+            <p class="hint">Так ведут себя модели «с рассуждениями»: они тратят весь лимит на размышления, и на ответ ничего не остаётся.</p>
+            <ol class="steps">
+                <li>Увеличьте «Лимит ответа, токенов» до 16384–32768.</li>
+                <li>Если не помогло — возьмите другую модель, без режима рассуждений (в названии обычно есть <code>instruct</code>).</li>
+            </ol>
+        </details>
+
+        <details>
+            <summary>Проверка на образце не прошла</summary>
+            <p class="hint">В замечании указан номер шага и параметр, который нужно поправить — обычно это буква колонки или название листа. Уточните описание задачи и составьте сценарий заново.</p>
+            <p class="hint">Проверьте также, что образец похож на рабочие файлы: те же колонки, та же строка заголовков, те же листы.</p>
+        </details>
+
+        <details>
+            <summary>В шаблоне нет нужной колонки</summary>
+            <p class="hint">Колонку можно добавить прямо в описании задачи, например: «вставь колонку «Изображение» перед колонкой B». Программа добавит её в шаблон и сдвинет остальные.</p>
+        </details>
+
+        <details>
+            <summary>Куда сохранились готовые файлы</summary>
+            <p class="hint">В папку данных программы. Точный путь виден на вкладке «Настройки», раздел «Хранение данных», а открыть её можно кнопкой «Открыть папку данных» на вкладке «О программе».</p>
+        </details>
+
+        <details>
+            <summary>Как перенести программу на другой компьютер</summary>
+            <p class="hint">Скопируйте папку программы целиком — вместе с папкой <code>data</code>. В ней лежат сценарии, настройки и готовые файлы, поэтому они переедут вместе с программой.</p>
+            <p class="hint">Перед обновлением версии сделайте резервную копию: вкладка «О программе» → «Сохранить резервную копию данных».</p>
+        </details>
+    </div>
+
+    <div class="panel">
+        <h2>Мои другие сервисы</h2>
+        <p class="hint">Кроме Макросыча у меня есть и другие программы для работы. Если пригодятся —
+        загляните.</p>
+        <table class="kv">
+            <tr><th>Напомни-ка!</th><td><a href="https://napomni-ka.ru" target="_blank" rel="noopener">napomni-ka.ru</a> — напоминалка с ИИ: наговорите или напишите задачу обычными словами, а сервис сам сделает из неё напоминание, заметку или список дел. Напоминания приходят в Telegram, MAX или на почту. Подходит для семьи и небольших команд.</td></tr>
+        </table>
+    </div>
+</section>
+
+<!-- ============================= НАСТРОЙКИ ============================= -->
+<section id="tab-settings" class="hidden">
+    <div class="panel">
+        <h2>Подключение к нейросети</h2>
+        <p class="hint">Нейросеть нужна только для составления нового сценария. Готовые сценарии запускаются без неё — без интернета, без оплаты и сколько угодно раз.</p>
+        <p class="hint">Сервис нейросети можно выбрать любой, который понравится. Зарегистрируйтесь на его сайте, пополните там баланс и вставьте ключ в поле «Ключ доступа» ниже. Автору программы платить не нужно: вы платите только за токены, которые нужны для составления сценария, — обычно от нескольких копеек до десятков рублей за один сценарий. Точные цены и модели смотрите на сайте выбранного сервиса.</p>
+        <p class="hint">Рекомендуемый сервис — <a href="https://routerai.ru" target="_blank" rel="noopener">RouterAI</a>: ChatGPT, Claude, Gemini и другие модели в одном месте, оплата в рублях. Есть и другие, например <a href="https://polza.ai" target="_blank" rel="noopener">Polza.AI</a> — больше 400 моделей, пополнение картой российского банка. Подойдёт и любой другой сервис с OpenAI-совместимым API, а модель на своём компьютере (LM Studio, Ollama) сделает составление сценариев бесплатным.</p>
+        <div id="privacy-banner"></div>
+        <label for="provider-url">Адрес сервиса</label>
+        <input type="text" id="provider-url" placeholder="https://api.openai.com/v1 или http://127.0.0.1:1234/v1">
+        <p class="hint" style="margin-top:6px">
+            Для LM Studio, Ollama и других локальных серверов адрес обычно заканчивается на
+            <code>/v1</code> — например <code>http://127.0.0.1:1234/v1</code>.
+            Если указать адрес без <code>/v1</code>, приложение попробует оба варианта само.
+        </p>
+        <label for="provider-model">Модель</label>
+        <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="provider-model" list="model-options" placeholder="например, gpt-4o-mini">
+            <button class="ghost" id="btn-models" type="button">Список моделей</button>
+        </div>
+        <datalist id="model-options"></datalist>
+        <div class="row">
+            <div>
+                <label for="provider-timeout">Ожидание ответа, секунд</label>
+                <input type="number" id="provider-timeout" min="30" max="3600" step="30">
+            </div>
+            <div>
+                <label for="provider-maxtokens">Лимит ответа, токенов</label>
+                <input type="number" id="provider-maxtokens" min="512" max="131072" step="512">
+            </div>
+        </div>
+        <p class="hint" style="margin-top:6px">
+            Модели «с рассуждениями» тратят лимит на размышления — им нужен большой запас
+            (16384 и больше). Если модель отвечает пустым ответом, увеличьте лимит или выберите
+            модель без режима рассуждений (обычно в названии есть «instruct»).
+        </p>
+        <label for="provider-key">Ключ доступа</label>
+        <input type="password" id="provider-key" placeholder="ключ хранится только на этом компьютере">
+        <div class="notice warn">
+            <strong>Ключ — личный</strong>
+            Ключ сохраняется в файле настроек на этом компьютере, не попадает в экспортируемые сценарии и в журналы. Передавать его коллегам не нужно: каждый настраивает своё подключение.
+        </div>
+        <div class="actions">
+            <button class="primary" id="btn-save-settings">Сохранить</button>
+            <button class="ghost" id="btn-test">Проверить подключение</button>
+        </div>
+        <div id="settings-status"></div>
+    </div>
+
+    <div class="panel">
+        <h2>Приватность</h2>
+        <p class="hint">Определяет, сколько данных образца уходит в модель при составлении сценария.</p>
+        <div class="row">
+            <div>
+                <label for="privacy-rows">Строк-примеров отправлять</label>
+                <input type="number" id="privacy-rows" min="0" max="20">
+            </div>
+            <div>
+                <label for="privacy-confirm">Предупреждать перед отправкой во внешний сервис</label>
+                <select id="privacy-confirm">
+                    <option value="1">Да, показывать предупреждение</option>
+                    <option value="0">Нет</option>
+                </select>
+            </div>
+            <div>
+                <label for="privacy-mask">Маскировать значения в примерах</label>
+                <select id="privacy-mask">
+                    <option value="0">Нет — показывать как есть</option>
+                    <option value="1">Да — скрывать символы</option>
+                </select>
+            </div>
+        </div>
+        <div class="actions">
+            <button class="primary" id="btn-save-privacy">Сохранить</button>
+        </div>
+        <div id="privacy-status"></div>
+    </div>
+
+    <div class="panel">
+        <h2>Хранение данных</h2>
+        <div id="storage-details"></div>
+    </div>
+</section>
+
+<!-- ============================= О ПРОГРАММЕ ============================= -->
+<section id="tab-about" class="hidden">
+
+    <div class="panel">
+        <h2>Макросыч — бесплатная программа для работы с таблицами</h2>
+        <p class="hint">Макросыч делает в Excel то, что обычно делают руками: переносит данные из одной
+        таблицы в другую, собирает значения из нескольких строк в одну ячейку, скачивает фотографии
+        по ссылкам, вставляет картинки и формулы. Сценарий описывается один раз, а потом запускается
+        на новых файлах — без интернета и без нейросети.</p>
+        <p class="hint">Программа бесплатная: без рекламы, без подписки и без сбора данных — все ваши
+        файлы остаются на вашем компьютере.</p>
+        <div class="notice info">
+            <strong>Сначала загляните в «Как пользоваться»</strong>
+            Там шесть разборов частых ситуаций: не подключается нейросеть, модель отвечает пустым
+            ответом, не прошла проверка на образце, в шаблоне нет нужной колонки, куда сохранились
+            готовые файлы, как перенести программу на другой компьютер. Обычно ответ находится
+            там за минуту, а письма пришлось бы ждать.
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Сколько стоит пользоваться Макросычем</h2>
+        <p class="hint">Сама программа бесплатная, и готовые сценарии запускаются сколько угодно раз —
+        без интернета и без оплаты. Платить приходится только за составление нового сценария: для
+        этого нужна нейросеть.</p>
+        <p class="hint">Сервис нейросети можно выбрать любой, который понравится: зарегистрируйтесь на
+        его сайте, пополните там баланс и вставьте ключ в настройках. Деньги за токены списывает
+        выбранный сервис, автору программы платить не нужно. Один сценарий обычно стоит от нескольких
+        копеек до десятков рублей — зависит от модели и размера таблицы.</p>
+        <table class="kv">
+            <tr><th>RouterAI</th><td><a href="https://routerai.ru" target="_blank" rel="noopener">routerai.ru</a> — рекомендуемый: ChatGPT, Claude, Gemini и другие модели в одном месте, оплата в рублях.</td></tr>
+            <tr><th>Polza.AI</th><td><a href="https://polza.ai" target="_blank" rel="noopener">polza.ai</a> — больше 400 моделей, пополнение баланса картой российского банка.</td></tr>
+            <tr><th>Другие сервисы</th><td>Подойдёт любой сервис с OpenAI-совместимым API. А если поставить модель на свой компьютер (LM Studio, Ollama), составление сценариев не будет стоить ничего.</td></tr>
+        </table>
+    </div>
+
+    <div class="panel">
+        <h2>Ещё один мой сервис — «Напомни-ка!»</h2>
+        <p class="hint">Напоминалка с ИИ: наговорите или напишите задачу обычными словами, а сервис
+        сам сделает из неё напоминание, заметку или список дел. Напоминания приходят в Telegram, MAX
+        или на почту — удобно не забыть про отчёт, оплату, день рождения или лекарство. Загляните:
+        <a href="https://napomni-ka.ru" target="_blank" rel="noopener">napomni-ka.ru</a>.</p>
+    </div>
+
+    <div class="panel">
+        <h2>Если хочется сказать спасибо</h2>
+        <p class="hint">Программа бесплатная и такой останется — платить за неё не нужно. Но если
+        Макросыч сэкономил вам время и хочется сказать спасибо, есть два приятных способа, и оба
+        с пользой для вас:</p>
+        <table class="kv">
+            <tr><th>Подушка для дома</th><td>Можно выбрать себе красивую подушку — <a href="https://www.wildberries.ru/seller/617389" target="_blank" rel="noopener">каталог на Wildberries</a>.</td></tr>
+            <tr><th>Напомни-ка!</th><td>Пользоваться <a href="https://napomni-ka.ru" target="_blank" rel="noopener">Напомникой</a> — польза будет и вам, и мне.</td></tr>
+        </table>
+        <p class="hint">Если ничего из этого не нужно — просто пользуйтесь программой. Это тоже
+        хорошая благодарность.</p>
+    </div>
+
+    <div class="panel">
+        <h2>Сотрудничество и индивидуальная разработка</h2>
+        <p class="hint">По вопросам сотрудничества и индивидуальной разработки обращайтесь по контактам
+        ниже.</p>
+        <table class="kv">
+            <tr><th>Разработчик</th><td>ИП Мухин Александр Викторович · ОГРНИП 322366800007590 · Воронеж</td></tr>
+            <tr><th>Почта</th><td><a href="mailto:mail@mxander.ru">mail@mxander.ru</a></td></tr>
+            <tr><th>Telegram</th><td><a href="https://t.me/MXander" target="_blank" rel="noopener">@MXander</a></td></tr>
+            <tr><th>MAX</th><td><a href="https://max.ru/u/f9LHodD0cOLEW9-CYbHN_u7gelKnzN6yzmlIg8hZsQo9xGEK3JR3aFw6L1k" target="_blank" rel="noopener">Профиль в MAX</a></td></tr>
+            <tr><th>ВКонтакте</th><td><a href="https://vk.com/mxander" target="_blank" rel="noopener">vk.com/mxander</a></td></tr>
+            <tr><th>Сайт</th><td><a href="https://mxander.ru" target="_blank" rel="noopener">mxander.ru</a></td></tr>
+            <tr><th>Страница программы</th><td><a href="https://mxander.ru/makrosych" target="_blank" rel="noopener">mxander.ru/makrosych</a> — описание возможностей и дистрибутив для скачивания</td></tr>
+        </table>
+    </div>
+
+    <div class="panel">
+        <h2>Обновление программы</h2>
+        <p class="hint">Сценарии, настройки и результаты лежат отдельно от файлов программы — в папке данных. Поэтому обновление версии их не затрагивает. Установлена версия: <b id="about-version">—</b>.</p>
+        <div class="notice info">
+            <strong>Порядок обновления</strong>
+            <ol class="steps">
+                <li>Сохраните резервную копию данных кнопкой ниже — это страховка на случай непредвиденного.</li>
+                <li>Скачайте новую версию программы и распакуйте её в отдельную папку.</li>
+                <li>Перенесите из новой версии только файлы программы: <code>app</code>, <code>tools</code>, <code>launcher</code>, <code>runtime</code>, <code>vendor</code>, <code>Макросыч.exe</code>, <code>start.bat</code>, <code>stop.bat</code>, <code>README.md</code>, <code>VERSION</code>, <code>LICENSE</code>.</li>
+                <li>Папку <code>data</code> не трогайте — в ней ваши сценарии, образцы и готовые файлы.</li>
+                <li>Запустите <code>Макросыч.exe</code> и проверьте номер версии в шапке окна.</li>
+            </ol>
+        </div>
+        <div class="actions">
+            <button class="primary" id="btn-about-backup">Сохранить резервную копию данных</button>
+            <button class="ghost" id="btn-about-open">Открыть папку данных</button>
+        </div>
+        <div id="about-backup-status"></div>
+    </div>
+
+    <div class="panel">
+        <h2>Сведения о программе</h2>
+        <p class="hint">Версия и окружение — на случай, если понадобится написать мне о проблеме:
+        эти данные помогают быстрее найти причину. Сами по себе они никуда не отправляются.</p>
+        <div id="about-diagnostics"></div>
+        <div class="actions">
+            <button class="ghost" id="btn-about-copy-diag">Скопировать сведения</button>
+        </div>
+        <div id="about-status"></div>
+    </div>
+</section>
+
+</main>
+
+<div id="confirm-modal" class="hidden" style="position:fixed;inset:0;background:rgba(31,41,51,.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;">
+    <div class="panel" style="max-width:620px;margin:0">
+        <h2>Данные образца уйдут во внешний сервис</h2>
+        <div id="confirm-body"></div>
+        <div class="actions">
+            <button class="primary" id="btn-confirm-send">Продолжить и отправить</button>
+            <button class="ghost" id="btn-cancel-send">Отмена</button>
+        </div>
+    </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

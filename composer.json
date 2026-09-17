@@ -1,0 +1,14 @@
+{
+    "name": "mxander/makrosych",
+    "description": "Макросыч — локальное приложение для создания и запуска сценариев обработки Excel",
+    "type": "project",
+    "license": "Apache-2.0",
+    "require": {
+        "php": ">=8.1",
+        "phpoffice/phpspreadsheet": "^5.5"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

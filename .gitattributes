@@ -1,0 +1,13 @@
+# Текстовые файлы нормализуются к LF в репозитории.
+* text=auto
+
+# bat/cmd обязаны быть в CRLF: cmd.exe не понимает LF-переводы строк.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Двоичные файлы: git не должен их нормализовать и пытаться склеивать в diff.
+*.ico binary
+*.exe binary
+*.zip binary
+*.xls binary
+*.xlsx binary
