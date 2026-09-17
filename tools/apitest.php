@@ -158,7 +158,13 @@ check('таблица хранения данных оформлена как «
 echo "\nВкладка «Как пользоваться»\n";
 check('вкладка справки есть в странице', str_contains($page['body'], 'tab-help'));
 check('кнопка справки есть в навигации', str_contains($page['body'], '>Как пользоваться<'));
-check('в справке описан первый сценарий', str_contains($page['body'], 'Первый сценарий: четыре шага'));
+check('в справке описан первый сценарий', str_contains($page['body'], 'Первый сценарий: пять шагов'));
+
+$firstStepAt = strpos($page['body'], 'подключите нейросеть: адрес сервиса');
+$sampleStepAt = strpos($page['body'], '«Новая задача»</b>, выберите файл');
+check('первым шагом справки идёт подключение нейросети',
+    $firstStepAt !== false && $sampleStepAt !== false && $firstStepAt < $sampleStepAt,
+    "подключение: {$firstStepAt}, образец: {$sampleStepAt}");
 check('в справке описан запуск на новых файлах', str_contains($page['body'], 'Как запускать сценарий на новых файлах'));
 check('в справке есть разбор проблем с подключением', str_contains($page['body'], 'Не подключается к нейросети'));
 check('в справке объяснён случай с антивирусом', str_contains($page['body'], 'Проверка защищённых соединений'));
@@ -186,8 +192,17 @@ $pageText = (string) preg_replace('/\s+/u', ' ', $page['body']);
 $paidMentions = substr_count(mb_strtolower($pageText), 'автору программы платить не нужно');
 $priceMentions = substr_count($pageText, 'от нескольких копеек до десятков рублей');
 
-check('сказано, что запуск готовых сценариев бесплатен',
+check('сказано, что запуск уже созданных сценариев бесплатен',
     str_contains($pageText, 'без интернета, без оплаты и сколько угодно раз'));
+check('сказано, что без нейросети новый сценарий не составить',
+    substr_count($pageText, 'новый сценарий создать') >= 2,
+    'упоминаний: ' . substr_count($pageText, 'новый сценарий создать'));
+check('сказано, что библиотека сценариев при установке пуста',
+    substr_count($pageText, 'при установке пуста') >= 3,
+    'упоминаний: ' . substr_count($pageText, 'при установке пуста'));
+check('названа рекомендуемая модель upstage/solar-pro4',
+    substr_count($page['body'], 'upstage/solar-pro4') >= 2,
+    'упоминаний: ' . substr_count($page['body'], 'upstage/solar-pro4'));
 check('о цене создания сценария сказано в трёх местах (настройки, справка, «О программе»)',
     $priceMentions >= 3, 'упоминаний: ' . $priceMentions);
 check('сказано, что автору платить не нужно, в трёх местах',

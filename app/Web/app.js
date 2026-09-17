@@ -572,7 +572,7 @@ function renderPrivacyNotice(privacy, providerConfigured) {
 
     if (!providerConfigured) {
         notice(container, 'warn', 'Не настроено подключение к нейросети',
-            'Откройте вкладку «Настройки», укажите адрес сервиса и модель.');
+            'Сценарий составляет нейросеть, поэтому без подключения создать новый сценарий нельзя. Откройте вкладку «Настройки», укажите адрес сервиса, модель и ключ доступа.');
         el('btn-generate').disabled = true;
         return;
     }
