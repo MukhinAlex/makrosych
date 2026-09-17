@@ -176,10 +176,11 @@ function release_missing(string $root): array
 [$out, $trim] = release_parse_args(array_slice($argv, 1));
 
 $root = APP_ROOT;
-$folder = 'Макросыч-' . APP_VERSION;
+$folder = 'Макросыч-' . APP_VERSION;          // каталог внутри архива — по-русски, как увидит пользователь
+$archiveName = 'makrosych-' . APP_VERSION;    // имя файла — латиницей: кириллицу в именах портят браузеры и архиваторы
 
 if ($out === null || $out === '') {
-    $out = dirname($root) . DIRECTORY_SEPARATOR . 'dist' . DIRECTORY_SEPARATOR . $folder . '.zip';
+    $out = dirname($root) . DIRECTORY_SEPARATOR . 'dist' . DIRECTORY_SEPARATOR . $archiveName . '.zip';
 }
 
 $missing = release_missing($root);

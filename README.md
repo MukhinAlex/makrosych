@@ -38,7 +38,7 @@
 
 ## Установка и запуск
 
-1. Скачайте `Макросыч-<версия>.zip` со страницы [Releases](../../releases) этого репозитория.
+1. Скачайте `makrosych-<версия>.zip` со страницы [Releases](../../releases) этого репозитория.
 2. **Разблокируйте архив до распаковки.** Правой кнопкой по скачанному файлу → «Свойства» →
    внизу галочка «Разблокировать» → «ОК». Windows помечает файлы из интернета, и без этого
    шага часть файлов может не запуститься.
@@ -125,7 +125,7 @@ Apache License 2.0 — см. [LICENSE](LICENSE) и [NOTICE](NOTICE). Прогр�
 ```bat
 launcher\build.bat                                 :: собрать Макросыч.exe из launcher\Makrosych.cs
 composer install --no-dev                          :: поставить PhpSpreadsheet в vendor/
-runtime\php\php.exe tools\make_release.php --trim   :: собрать dist\Макросыч-<версия>.zip
+runtime\php\php.exe tools\make_release.php --trim   :: собрать dist\makrosych-<версия>.zip
 ```
 
 Сценарий — это JSON из готовых операций; движок не исполняет сгенерированный код. Новая операция
