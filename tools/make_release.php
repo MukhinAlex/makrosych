@@ -37,7 +37,7 @@ const RELEASE_FILES = [
 const RELEASE_DIRS = ['app', 'tools', 'launcher', 'runtime', 'vendor'];
 
 /** Файлы, нужные только в каталоге разработки: они работают с образцами files/ и 0104/. */
-const RELEASE_SKIP = ['tools/selftest.php', 'tools/apitest.php'];
+const RELEASE_SKIP = ['tools/selftest.php', 'tools/apitest.php', 'tools/seed_recipes.php'];
 
 /** Что убирает --trim: файлы PHP, не подключённые в runtime/php/php.ini. */
 const RELEASE_TRIM = [
