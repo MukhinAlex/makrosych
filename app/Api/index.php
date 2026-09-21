@@ -15,6 +15,7 @@ require_once dirname(__DIR__) . '/bootstrap.php';
 use App\Engine\Ops;
 use App\Lib\Paths;
 use App\Lib\Profiler;
+use App\Lib\RecipeInputs;
 use App\Lib\RecipeValidator;
 use App\Lib\Runner;
 use App\Lib\Settings;
@@ -178,18 +179,57 @@ function api_session_sample(string $sessionId): string
     return $found[0];
 }
 
-/** Файл-справочник сессии (второй файл, необязательный): например, прайс для ВПР. */
-function api_session_lookup(string $sessionId): ?string
+/**
+ * Псевдоним второго файла сессии: справочник «lookup» или шаблон «template».
+ *
+ * Пользователь прикладывает второй файл один раз, но роль у него разная:
+ * справочник (прайс для ВПР) или шаблон, который нужно заполнить.
+ */
+function api_session_second_alias(string $sessionId): ?string
 {
-    $found = glob(api_session_dir($sessionId) . '/lookup.*') ?: [];
+    foreach (['lookup', 'template'] as $alias) {
+        if (api_session_second_files($sessionId, $alias) !== []) {
+            return $alias;
+        }
+    }
+
+    return null;
+}
+
+/** @return array<int, string> */
+function api_session_second_files(string $sessionId, string $alias): array
+{
+    $found = glob(api_session_dir($sessionId) . '/' . $alias . '.*') ?: [];
+
+    // Профиль второго файла лежит рядом и под ту же маску не должен попадать
+    return array_values(array_filter(
+        $found,
+        static fn (string $path): bool => !str_ends_with($path, '_profile.json')
+    ));
+}
+
+/** Второй файл сессии (справочник или шаблон), если он приложен. */
+function api_session_second(string $sessionId): ?string
+{
+    $alias = api_session_second_alias($sessionId);
+    if ($alias === null) {
+        return null;
+    }
+
+    $found = api_session_second_files($sessionId, $alias);
 
     return $found === [] ? null : $found[0];
 }
 
 /** @return array<string, mixed>|null */
-function api_session_lookup_profile(string $sessionId): ?array
+function api_session_second_profile(string $sessionId): ?array
 {
-    $file = api_session_dir($sessionId) . '/lookup_profile.json';
+    $alias = api_session_second_alias($sessionId);
+    if ($alias === null) {
+        return null;
+    }
+
+    $file = api_session_dir($sessionId) . '/' . $alias . '_profile.json';
     if (!is_file($file)) {
         return null;
     }
@@ -208,12 +248,44 @@ function api_session_inputs(string $sessionId): array
 {
     $sample = api_session_sample($sessionId);
     $inputs = ['input' => $sample, 'template' => $sample];
-    $lookup = api_session_lookup($sessionId);
-    if ($lookup !== null) {
-        $inputs['lookup'] = $lookup;
+
+    $alias = api_session_second_alias($sessionId);
+    $path = api_session_second($sessionId);
+    if ($alias !== null && $path !== null) {
+        $inputs[$alias] = $path;
     }
 
     return $inputs;
+}
+
+/**
+ * Сколько файлов нужно задаче этой сессии (см. RecipeInputs::MODES).
+ *
+ * Значение выбирает пользователь при создании задачи. Если записи нет
+ * (старая сессия), считаем по приложенным файлам.
+ */
+function api_session_file_mode(string $sessionId): string
+{
+    $file = api_session_dir($sessionId) . '/files.json';
+    if (is_file($file)) {
+        $decoded = json_decode((string) file_get_contents($file), true);
+        if (is_array($decoded)) {
+            return RecipeInputs::modeFrom($decoded['mode'] ?? 'single');
+        }
+    }
+
+    $alias = api_session_second_alias($sessionId);
+
+    return $alias === null ? 'single' : RecipeInputs::modeFrom($alias);
+}
+
+/** Запись выбора «сколько файлов» в каталог сессии. */
+function api_session_write_file_mode(string $sessionId, string $mode): void
+{
+    file_put_contents(
+        api_session_dir($sessionId) . '/files.json',
+        json_encode(['mode' => RecipeInputs::modeFrom($mode)], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
+    );
 }
 
 /** @return array<int, array<string, mixed>> */
@@ -348,9 +420,16 @@ switch ($action) {
     case 'settings.save':
         $provider = (array) ($input['provider'] ?? []);
         $privacy = (array) ($input['privacy'] ?? []);
+        $ui = (array) ($input['ui'] ?? []);
+        if ($ui !== []) {
+            // Незнакомое значение не сохраняем: иначе интерфейс останется без масштаба
+            $scale = (string) ($ui['scale'] ?? 'normal');
+            $ui = ['scale' => in_array($scale, Settings::UI_SCALES, true) ? $scale : 'normal'];
+        }
         Settings::save(array_filter([
             'provider' => $provider === [] ? null : $provider,
             'privacy' => $privacy === [] ? null : $privacy,
+            'ui' => $ui === [] ? null : $ui,
         ], static fn ($value) => $value !== null));
 
         api_json([
@@ -405,46 +484,63 @@ switch ($action) {
             json_encode($profile, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         );
 
-        // Необязательный второй файл: справочник, из которого берут данные (прайс для ВПР)
-        $lookupProfile = null;
-        foreach (glob($dir . '/lookup.*') ?: [] as $old) {
-            @unlink($old);
-        }
-        @unlink($dir . '/lookup_profile.json');
+        // Необязательный второй файл: справочник, из которого берут данные (прайс для ВПР),
+        // или шаблон, который нужно заполнить. Роль выбирает пользователь.
+        $fileMode = RecipeInputs::modeFrom($input['file_mode'] ?? ($_POST['file_mode'] ?? 'single'));
+        $secondAlias = RecipeInputs::secondAlias($fileMode) ?? 'lookup';
+        $secondProfile = null;
+        $secondName = '';
 
-        if (isset($_FILES['lookup']) && $_FILES['lookup']['error'] === UPLOAD_ERR_OK) {
-            $lookupExtension = strtolower(pathinfo((string) $_FILES['lookup']['name'], PATHINFO_EXTENSION));
-            if (!in_array($lookupExtension, ['xlsx', 'xls', 'csv'], true)) {
-                api_fail('Файл-справочник: поддерживаются XLSX, XLS и CSV');
+        foreach (['lookup', 'template'] as $alias) {
+            foreach (api_session_second_files($sessionId, $alias) as $old) {
+                @unlink($old);
+            }
+            @unlink($dir . '/' . $alias . '_profile.json');
+        }
+
+        if (isset($_FILES['second']) && $_FILES['second']['error'] === UPLOAD_ERR_OK) {
+            $secondExtension = strtolower(pathinfo((string) $_FILES['second']['name'], PATHINFO_EXTENSION));
+            if (!in_array($secondExtension, ['xlsx', 'xls', 'csv'], true)) {
+                api_fail('Второй файл: поддерживаются XLSX, XLS и CSV');
             }
 
-            $lookupPath = $dir . '/lookup.' . $lookupExtension;
-            if (!move_uploaded_file($_FILES['lookup']['tmp_name'], $lookupPath)) {
-                api_fail('Не удалось сохранить файл-справочник');
+            $secondPath = $dir . '/' . $secondAlias . '.' . $secondExtension;
+            if (!move_uploaded_file($_FILES['second']['tmp_name'], $secondPath)) {
+                api_fail('Не удалось сохранить второй файл');
             }
 
             try {
-                $lookupProfile = Profiler::profile($lookupPath, [
+                $secondProfile = Profiler::profile($secondPath, [
                     'sample_rows' => max(2, min(3, (int) Settings::get('privacy.sample_rows', 3))),
                     'mask' => (bool) Settings::get('privacy.mask_values', false),
                 ]);
             } catch (\Throwable $e) {
-                @unlink($lookupPath);
-                api_fail('Не удалось прочитать файл-справочник: ' . $e->getMessage());
+                @unlink($secondPath);
+                api_fail('Не удалось прочитать второй файл: ' . $e->getMessage());
             }
 
+            $secondName = (string) $_FILES['second']['name'];
             file_put_contents(
-                $dir . '/lookup_profile.json',
-                json_encode($lookupProfile, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                $dir . '/' . $secondAlias . '_profile.json',
+                json_encode($secondProfile, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
             );
+        } elseif ($fileMode !== 'single') {
+            // Выбран вариант с двумя файлами, а второй не приложили — задача остаётся с одним
+            $fileMode = 'single';
         }
+
+        api_session_write_file_mode($sessionId, $fileMode);
 
         api_json([
             'ok' => true,
             'session_id' => $sessionId,
+            'file_mode' => $fileMode,
+            'second_alias' => $secondProfile !== null ? $secondAlias : '',
             'profile' => $profile,
-            'lookup_profile' => $lookupProfile,
-            'lookup_name' => $lookupProfile !== null ? basename((string) $_FILES['lookup']['name']) : '',
+            'second_profile' => $secondProfile,
+            'second_name' => $secondName,
+            'lookup_profile' => $secondProfile,
+            'lookup_name' => $secondName,
             'privacy' => [
                 'level' => Settings::privacyLevel(),
                 'label' => Settings::privacyLabel(),
@@ -478,13 +574,19 @@ switch ($action) {
         }
 
         $profile = api_session_profile($sessionId);
-        $lookupProfile = api_session_lookup_profile($sessionId);
         $history = api_session_history($sessionId);
+        $secondAlias = api_session_second_alias($sessionId);
+        $secondPath = api_session_second($sessionId);
         $client = new Client();
 
         $messages = [
             ['role' => 'system', 'content' => Prompts::system()],
-            ['role' => 'user', 'content' => Prompts::user($task, $profile, $history, $lookupProfile)],
+            ['role' => 'user', 'content' => Prompts::user($task, $profile, $history, [
+                'file_mode' => api_session_file_mode($sessionId),
+                'second_alias' => $secondAlias,
+                'second_name' => $secondPath !== null ? basename($secondPath) : '',
+                'second_profile' => api_session_second_profile($sessionId),
+            ])],
         ];
 
         $response = $client->chat($messages, ['json' => true, 'temperature' => 0]);
@@ -579,6 +681,11 @@ switch ($action) {
             api_fail('Укажите название сценария');
         }
 
+        // Сколько файлов нужно сценарию, решает пользователь при создании задачи:
+        // в сценарии это записывается один раз, и окно запуска показывает ровно
+        // столько полей, сколько файлов у задачи
+        $recipe['inputs'] = RecipeInputs::describe($recipe, api_session_file_mode($sessionId));
+
         $expected = null;
         try {
             $expected = Runner::execute($recipe, [
@@ -594,11 +701,13 @@ switch ($action) {
             $expected = null;
         }
 
-        // Файл-справочник сохраняется вместе со сценарием: иначе его нельзя перепроверить
+        // Второй файл (справочник или шаблон) сохраняется вместе со сценарием:
+        // иначе его нельзя перепроверить и передать коллеге
         $extraSamples = [];
-        $lookupPath = api_session_lookup($sessionId);
-        if ($lookupPath !== null) {
-            $extraSamples['lookup'] = $lookupPath;
+        $secondAlias = api_session_second_alias($sessionId);
+        $secondPath = api_session_second($sessionId);
+        if ($secondAlias !== null && $secondPath !== null) {
+            $extraSamples[$secondAlias] = $secondPath;
         }
 
         try {
@@ -714,16 +823,42 @@ switch ($action) {
             }
         }
 
+        // Псевдонимы, которые берут файл у другого файла: сценарий, читающий и записывающий
+        // одну и ту же таблицу, просит один файл, а не два
+        $declared = (array) ($entry['recipe']['inputs'] ?? []);
+
         // Если файлов не приложили — используем образец сценария
         if ($inputs === []) {
             $sample = Store::samplePath($recipeId);
             if ($sample !== null) {
                 $inputs = ['input' => $sample, 'template' => $sample];
+                foreach (Store::extraSampleFiles($recipeId) as $alias => $path) {
+                    $inputs[(string) $alias] = $path;
+                }
+            }
+        }
+
+        foreach (RecipeInputs::sameAs($declared) as $alias => $source) {
+            if (!isset($inputs[$alias]) && isset($inputs[$source])) {
+                $inputs[$alias] = $inputs[$source];
             }
         }
 
         if ($inputs === []) {
             api_fail('Не приложен ни один файл для обработки');
+        }
+
+        // Объявленный вход, которого нет, — понятная ошибка вместо тихой подстановки
+        // чужого файла
+        $missing = [];
+        foreach (RecipeInputs::primary($declared) as $item) {
+            $alias = (string) ($item['alias'] ?? '');
+            if ($alias !== '' && !isset($inputs[$alias])) {
+                $missing[] = (string) ($item['label'] ?? $alias);
+            }
+        }
+        if ($missing !== []) {
+            api_fail('Приложите к запуску файлы: ' . implode(', ', $missing));
         }
 
         $params = $input['params'] ?? [];

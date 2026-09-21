@@ -32,7 +32,14 @@ final class Settings
             'mask_values' => false,
             'confirm_external' => true,
         ],
+        // Внешний вид интерфейса: размер текста (normal, large, xlarge).
+        'ui' => [
+            'scale' => 'normal',
+        ],
     ];
+
+    /** Допустимые значения масштаба текста. */
+    public const UI_SCALES = ['normal', 'large', 'xlarge'];
 
     private static ?array $cache = null;
 

@@ -12,6 +12,7 @@ const state = {
     session: null,
     profile: null,
     lookupProfile: null,
+    fileMode: null,
     recipe: null,
     validation: null,
     runJob: null,
@@ -111,6 +112,8 @@ async function bootstrap() {
     el('storage').innerHTML = 'Данные: <code>' + escapeHtml(data.paths.data) + '</code>'
         + (data.paths.portable ? ' · портативный режим' : ' · резервный режим');
 
+    applyUiScale((state.settings.ui || {}).scale);
+
     renderLibrary();
     renderSettings();
     renderStorage();
@@ -129,6 +132,41 @@ function collectAliases(recipe) {
         }
     }
     return [...aliases];
+}
+
+function defaultFileTitle(alias) {
+    return alias === 'template' ? 'Шаблон' : 'Файл данных (' + alias + ')';
+}
+
+/**
+ * Поля входных файлов для окна запуска.
+ *
+ * Сценарий объявляет входы сам ("inputs"). Файл, который берётся у другого файла
+ * (same_as), отдельного поля не получает — иначе сценарий, читающий и записывающий
+ * одну и ту же таблицу, просил бы приложить её дважды. Сценарии без "inputs"
+ * (созданные раньше) показывают поле на каждый псевдоним, как прежде.
+ */
+function runFileFields(recipe) {
+    const titles = recipe.files || {};
+    const declared = Array.isArray(recipe.inputs) ? recipe.inputs : [];
+
+    if (declared.length) {
+        return declared
+            .filter((item) => item && item.alias && !item.same_as)
+            .map((item) => ({
+                alias: String(item.alias),
+                title: String(item.label || titles[item.alias] || defaultFileTitle(String(item.alias))),
+                reuses: declared
+                    .filter((other) => other && other.same_as === item.alias && other.alias)
+                    .map((other) => String(other.alias)),
+            }));
+    }
+
+    return collectAliases(recipe).map((alias) => ({
+        alias,
+        title: titles[alias] ? String(titles[alias]) : defaultFileTitle(alias),
+        reuses: [],
+    }));
 }
 
 function renderLibrary() {
@@ -311,7 +349,7 @@ async function openRun(recipeId, dryRun) {
     const recipe = full.recipe_entry.recipe;
     state.runRecipe = recipeId;
 
-    const aliases = collectAliases(recipe);
+    const fields = runFileFields(recipe);
     const params = recipe.params || [];
     const area = el('run-area');
 
@@ -319,15 +357,11 @@ async function openRun(recipeId, dryRun) {
     html += '<p class="hint">' + escapeHtml(entry.description || '') + '</p>';
 
     if (!dryRun) {
-        const fileTitles = recipe.files || {};
-        html += '<h3>Файлы для обработки</h3><div class="row">';
-        for (const alias of aliases) {
-            // Подпись файла можно задать в сценарии ("files"); иначе — по псевдониму
-            const title = fileTitles[alias]
-                ? escapeHtml(String(fileTitles[alias]))
-                : escapeHtml(alias === 'template' ? 'Шаблон' : 'Файл данных') + ' (' + escapeHtml(alias) + ')';
-            html += '<div><label>' + title + '</label>'
-                + '<input type="file" data-alias="' + escapeHtml(alias) + '" accept=".xlsx,.xls,.csv"></div>';
+        html += '<h3>' + (fields.length === 1 ? 'Файл для обработки' : 'Файлы для обработки') + '</h3><div class="row">';
+        for (const field of fields) {
+            html += '<div><label>' + escapeHtml(field.title) + '</label>'
+                + '<input type="file" data-alias="' + escapeHtml(field.alias) + '" data-reuses="'
+                + escapeHtml(field.reuses.join(',')) + '" accept=".xlsx,.xls,.csv"></div>';
         }
         html += '</div>';
     }
@@ -374,6 +408,11 @@ async function startRun(recipeId, dryRun) {
     area.querySelectorAll('[data-alias]').forEach((input) => {
         if (input.files && input.files[0]) {
             form.append('file_' + input.dataset.alias, input.files[0]);
+            // Псевдонимы, которые берут тот же файл (например шаблон = таблица),
+            // уходят под своими именами — сценарий получит их без второго поля
+            for (const alias of (input.dataset.reuses || '').split(',').filter(Boolean)) {
+                form.append('file_' + alias, input.files[0]);
+            }
         }
     });
 
@@ -482,6 +521,134 @@ async function showRunResult(jobId, status, dryRun) {
 
 // ------------------------------------------------------------------ новая задача
 
+/**
+ * Сколько файлов нужно задаче. Выбор пользователя уходит в запрос к нейросети
+ * как жёсткое условие, поэтому сценарий не просит второй файл, которого нет.
+ */
+const SECOND_FILE_TEXTS = {
+    lookup: {
+        label: 'Файл-справочник (прайс, остатки)',
+        hint: 'Второй файл, из которого берутся данные: цены, наименования, остатки — по коду товара.',
+        title: 'Структура файла-справочника',
+    },
+    template: {
+        label: 'Файл-шаблон',
+        hint: 'Шаблон, в который нужно записать результат. Колонки и оформление берутся из него, поэтому приложите тот файл, который заполняете.',
+        title: 'Структура файла-шаблона',
+    },
+};
+
+function applyFileMode(mode) {
+    const second = SECOND_FILE_TEXTS[mode] || null;
+    const block = el('second-file-block');
+
+    if (second === null) {
+        block.classList.add('hidden');
+        el('second-file').value = '';
+        el('file-mode-hint').textContent = 'Выберите «один файл», если в вашей таблице есть всё, что нужно, и результат должен получиться в ней же.';
+        return;
+    }
+
+    block.classList.remove('hidden');
+    el('second-file-label').textContent = second.label;
+    el('second-file-hint').textContent = second.hint;
+    el('file-mode-hint').textContent = '';
+    el('second-panel-title').textContent = second.title;
+}
+
+el('file-mode').addEventListener('change', () => {
+    applyFileMode(el('file-mode').value);
+});
+
+/**
+ * Примеры задач для поля описания.
+ *
+ * Буквы и заголовки колонок подставляются из профиля загруженного файла:
+ * пользователю не нужно переводить пример на свою таблицу — он уже про неё.
+ */
+function promptExamples() {
+    const columns = (state.profile && state.profile.columns) || [];
+    const usable = columns.filter((column) => column && column.letter);
+
+    const byHeader = (pattern) => usable.find((column) => pattern.test(String(column.header || '')));
+    const byType = (type) => usable.find((column) => String(column.type || '').includes(type));
+
+    const article = byHeader(/артикул|код|sku|номенклатур|наимен/i) || byType('text') || usable[0] || null;
+    const amount = byHeader(/сумм|цена|стоимост|количест|вес|итог/i) || byType('number') || null;
+    const links = byHeader(/ссылк|фото|изображен|url/i) || byType('url') || null;
+
+    const letter = (column, fallback) => (column ? String(column.letter) : fallback);
+    const named = (column) => (column && column.header ? ' «' + String(column.header) + '»' : '');
+
+    const art = letter(article, 'B');
+    const artNamed = art + named(article);
+    const sum = letter(amount, 'C');
+    const sumNamed = sum + named(amount);
+    const link = letter(links, 'F');
+    const linkNamed = link + named(links);
+
+    const examples = [
+        ['Убрать дубликаты',
+            'Убери дубликаты: оставь по одной строке на ' + artNamed + ' и напиши рядом, сколько раз он встретился.'],
+        ['Сумма по ' + art,
+            'Сложи ' + sumNamed + ' по ' + artNamed + ' — одна строка на ' + art + ', внизу строка «Итого».'],
+        ['Промежуточные итоги',
+            'Сделай промежуточные итоги: оставь строки данных и после каждого ' + artNamed + ' добавь строку «X Итог», в конце — «Общий итог».'],
+        ['Отсортировать',
+            'Отсортируй строки по ' + sumNamed + ' от большего к меньшему.'],
+        ['ABC-анализ',
+            'Сделай ABC-анализ по ' + artNamed + ': сумма, доля в процентах, накопленная доля и столбчатая диаграмма.'],
+        ['Диаграмма',
+            'Построй столбчатую диаграмму: подписи из ' + artNamed + ', значения из ' + sumNamed + '.'],
+        ['Ссылки в одну ячейку',
+            'Собери значения из ' + linkNamed + ' в одну ячейку через перенос строки.'],
+        ['Разбить ссылки по строкам',
+            'Раздели значения из ' + linkNamed + ' — в ячейке их несколько через точку с запятой, нужна отдельная строка на каждую.'],
+        ['Ссылка на карточку',
+            'Поставь активную ссылку на карточку товара по ' + artNamed + ' (адрес вида https://сайт/catalog/значение). Текст ячейки не меняй.'],
+        ['Фото по коду',
+            'Вставь фото по ссылке в новую колонку «Изображение» рядом с ' + artNamed + ', высота 90.'],
+    ];
+
+    if (state.fileMode === 'lookup') {
+        examples.unshift(['Цены из прайса',
+            'Подставь из файла-справочника наименование и цену по коду из ' + artNamed + '.']);
+    }
+
+    if (state.fileMode === 'template') {
+        examples.unshift(['Заполнить шаблон',
+            'Перенеси данные в шаблон: ключ — ' + artNamed + ', заполни колонки шаблона.']);
+    }
+
+    return examples;
+}
+
+function renderPromptExamples() {
+    const container = el('prompt-examples');
+    container.innerHTML = '';
+
+    if (!state.session) {
+        return;
+    }
+
+    const title = document.createElement('div');
+    title.className = 'chips-title';
+    title.textContent = 'Примеры задач — нажмите, чтобы подставить текст, и поправьте под себя:';
+    container.appendChild(title);
+
+    for (const [label, text] of promptExamples()) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip';
+        chip.textContent = label;
+        chip.addEventListener('click', () => {
+            el('prompt').value = text;
+            el('prompt').focus();
+        });
+        container.appendChild(chip);
+    }
+}
+
 el('btn-analyze').addEventListener('click', async () => {
     const file = el('sample-file').files[0];
     if (!file) {
@@ -489,21 +656,34 @@ el('btn-analyze').addEventListener('click', async () => {
         return;
     }
 
-    const lookupFile = el('lookup-file').files[0];
+    const mode = el('file-mode').value;
+    const secondFile = el('second-file').files[0];
+    if (SECOND_FILE_TEXTS[mode] && !secondFile) {
+        notice(el('analyze-status'), 'warn', 'Нужен второй файл',
+            'Вы выбрали задачу с двумя файлами — приложите ' + escapeHtml(SECOND_FILE_TEXTS[mode].label.toLowerCase())
+            + ' или выберите «один файл».');
+        return;
+    }
+
     notice(el('analyze-status'), 'info', 'Читаю файл…', '');
 
     const form = new FormData();
     form.append('sample', file);
-    if (lookupFile) {
-        form.append('lookup', lookupFile);
+    form.append('file_mode', mode);
+    if (secondFile) {
+        form.append('second', secondFile);
     }
 
     try {
         const data = await api('session.create', { form });
         state.session = data.session_id;
         state.profile = data.profile;
-        state.lookupProfile = data.lookup_profile || null;
+        state.lookupProfile = data.second_profile || null;
+        state.fileMode = data.file_mode || 'single';
+        applyFileMode(data.file_mode || 'single');
+        el('file-mode').value = data.file_mode || 'single';
         renderProfile(data.profile);
+        renderPromptExamples();
         renderPrivacyNotice(data.privacy, data.provider_configured);
         el('profile-panel').classList.remove('hidden');
         el('chat-panel').classList.remove('hidden');
@@ -521,7 +701,7 @@ el('btn-analyze').addEventListener('click', async () => {
         }
 
         notice(el('analyze-status'), 'ok', 'Файл прочитан', state.lookupProfile
-            ? 'Структура определена. Файл-справочник тоже прочитан — его колонки можно использовать в задаче.'
+            ? 'Структура определена. Второй файл тоже прочитан — его колонки можно использовать в задаче.'
             : 'Структура определена, можно описывать задачу.');
     } catch (error) {
         notice(el('analyze-status'), 'error', 'Не удалось прочитать файл', escapeHtml(error.message));
@@ -596,6 +776,7 @@ el('btn-restart').addEventListener('click', () => {
     state.session = null;
     state.profile = null;
     state.lookupProfile = null;
+    state.fileMode = null;
     state.recipe = null;
     el('profile-panel').classList.add('hidden');
     el('lookup-panel').classList.add('hidden');
@@ -605,8 +786,10 @@ el('btn-restart').addEventListener('click', () => {
     el('analyze-status').innerHTML = '';
     el('chat').innerHTML = '';
     el('prompt').value = '';
+    el('prompt-examples').innerHTML = '';
     el('sample-file').value = '';
-    el('lookup-file').value = '';
+    el('file-mode').value = 'single';
+    applyFileMode('single');
     setPromptMode('task');
 });
 
@@ -855,6 +1038,22 @@ el('btn-save').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ настройки
 
+/**
+ * Размер текста в программе: «Обычный / Крупный / Очень крупный».
+ * Класс ставится на <html> (documentElement): в style.css переменная --scale
+ * объявлена на :root, а кегли --fs-* считаются там, где объявлены, — поэтому
+ * переопределять масштаб нужно на том же элементе. С классом на <body> текст
+ * не увеличивался. Кегль меняется сразу на всех вкладках.
+ */
+function applyUiScale(scale) {
+    const known = ['large', 'xlarge'];
+    const value = known.includes(scale) ? scale : 'normal';
+    document.documentElement.classList.remove('scale-large', 'scale-xlarge');
+    if (value !== 'normal') {
+        document.documentElement.classList.add('scale-' + value);
+    }
+}
+
 function renderSettings() {
     const provider = state.settings.provider || {};
     el('provider-url').value = provider.base_url || '';
@@ -869,6 +1068,8 @@ function renderSettings() {
     el('privacy-rows').value = privacy.sample_rows ?? 3;
     el('privacy-confirm').value = privacy.confirm_external ? '1' : '0';
     el('privacy-mask').value = privacy.mask_values ? '1' : '0';
+
+    el('ui-scale').value = (state.settings.ui || {}).scale || 'normal';
 
     renderPrivacyBanner();
 }
@@ -907,6 +1108,26 @@ el('btn-save-settings').addEventListener('click', async () => {
         el('provider-key').value = '';
         renderSettings();
         notice(status, 'ok', 'Настройки сохранены', 'Ключ остаётся на этом компьютере.');
+    } catch (error) {
+        notice(status, 'error', 'Не удалось сохранить', escapeHtml(error.message));
+    }
+});
+
+// Масштаб применяется сразу при выборе — видно, как будет выглядеть текст,
+// а кнопка «Применить» только запоминает выбор для следующих запусков.
+el('ui-scale').addEventListener('change', () => {
+    applyUiScale(el('ui-scale').value);
+    el('ui-status').innerHTML = '';
+});
+
+el('btn-save-ui').addEventListener('click', async () => {
+    const status = el('ui-status');
+    const scale = el('ui-scale').value;
+    try {
+        const data = await api('settings.save', { body: { ui: { scale } } });
+        state.settings = data.settings;
+        applyUiScale((data.settings.ui || {}).scale);
+        notice(status, 'ok', 'Размер текста сохранён', 'Настройка сохранится и при следующем запуске.');
     } catch (error) {
         notice(status, 'error', 'Не удалось сохранить', escapeHtml(error.message));
     }

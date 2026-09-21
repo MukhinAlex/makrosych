@@ -483,9 +483,9 @@ function op_images_fetch(Context $ctx, string $value, array $options): array
         return $fail("файл не найден: {$value}");
     }
 
-    // Ссылка: Яндекс Диск разрешается в набор файлов, обычная ссылка скачивается напрямую
+    // Ссылка: публичная ссылка облака разрешается в набор файлов, обычная скачивается напрямую
     $targets = [];
-    if (Http::isYandex($value)) {
+    if (Http::isCloud($value)) {
         $resolved = Http::resolve($value);
         if (!$resolved['success']) {
             return $fail($resolved['error']);

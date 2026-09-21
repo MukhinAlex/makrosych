@@ -73,8 +73,9 @@ final class Prompts
    Неправильно: {"op": "read_rows", "params": {"file": "input", "columns": {...}}}
 
 2. Значение параметра "file" — это ПСЕВДОНИМ входного файла: у основной таблицы это "input",
-   у справочника для операции lookup_field — "lookup". Значение параметра "template" — всегда
-   строка "template". Никогда не указывай настоящие имена файлов (например "6.xlsx")
+   у справочника для операции lookup_field — "lookup". У параметра "template": "template",
+   если шаблон — отдельный файл, и "input", если результат записывается в ту же таблицу,
+   из которой читаются данные. Никогда не указывай настоящие имена файлов (например "6.xlsx")
    и не оставляй их пустыми.
 
 3. В "columns" ключ — это имя поля, которое ты сам придумываешь (латиницей: key, links, article),
@@ -199,9 +200,57 @@ final class Prompts
     в "map" те же, что у aggregate. Итоговую строку у write_new_sheet ("totals") в этом случае
     не задавай: общий итог уже добавлен, иначе он будет в файле дважды.
 
+25. СКОЛЬКО ФАЙЛОВ НУЖНО ПОЛЬЗОВАТЕЛЮ. В разделе «Входные файлы» сказано, сколько файлов
+    пользователь приложит. Составь сценарий строго под это число:
+    - ОДИН файл: используй только псевдоним "input". Результат пишется в ту же таблицу —
+      для этого укажи "template": "input" (не отдельное слово "template"). Не добавляй
+      шаг с "lookup" и не проси второй файл: у пользователя его нет.
+    - ДВА файла (данные и справочник): основная таблица — "input", справочник — "lookup"
+      (операция lookup_field). Отдельный "template" не добавляй: результат пишется в "input".
+    - ДВА файла (данные и шаблон): таблица — "input", шаблон — "template" (операция write_cells
+      или insert_images). Справочник не добавляй.
+    Лишний второй файл — самая частая причина того, что сценарий просит приложить файл,
+    которого у пользователя нет.
+
+26. ДУБЛИКАТЫ, СОРТИРОВКА, ДИАГРАММЫ.
+    - «Убрать дубликаты», «оставить по одной строке на товар» — операция dedupe:
+      {"op": "dedupe", "by": "article", "count_field": "repeats"} (count_field — если нужно
+      записать, сколько раз товар встретился). Для этого НЕ нужны group_by и join_values.
+    - «Разложить по порядку», «от большего к меньшему», «по алфавиту» — операция sort_rows:
+      {"op": "sort_rows", "by": "total", "dir": "desc", "numeric": true}. Для сумм и количеств
+      обязательно "numeric": true, иначе Excel-числа сравниваются как текст.
+    - ABC-анализ — это цепочка: group_by → aggregate (сумма) → sort_rows по сумме по убыванию
+      → write_new_sheet. Если пользователь просит классы A/B/C, добавь в новый файл колонку
+      с формулой доли и накопительной доли, например
+      {"column": "C", "title": "Доля, %", "formula": "=B{row}/SUM(B2:B{last})*100"}
+      и {"column": "D", "title": "Накопленная доля, %", "formula": "=C{row}+D{row-1}"} —
+      строки в новом файле идут по порядку, поэтому формула по строке считается верно.
+    - Диаграмма — операция insert_chart, ставится ПОСЛЕ шага, создавшего файл, и указывает
+      его параметром "source":
+      {"op": "insert_chart", "source": "результат.xlsx", "output": "с-диаграммой.xlsx",
+       "type": "bar", "title": "Сумма по артикулам", "categories": "A",
+       "series": {"B": "Сумма"}, "data_from_row": 2}
+      Виды: bar (столбчатая), line (линейная), pie (круговая), area (площадная).
+      Файл указывается в "source", а не в "file": параметр "file" движок понимает как
+      псевдоним входного файла.
+    - Прибыль, наценка, НДС и другие расчёты делай формулами Excel в новом файле
+      ({"column": "D", "title": "Прибыль", "formula": "=B{row}-C{row}"}), а не пересчётом
+      значений: тогда пользователь видит формулу и может её поправить.
+
+## Перед ответом проверь себя
+
+- все колонки взяты из профиля файла, а не придуманы;
+- псевдонимов файлов ровно столько, сколько сказано в разделе «Входные файлы»;
+- каждый шаг что-то делает: нет шагов «на всякий случай» и повторов;
+- сценарий создаёт файл результата (write_cells, write_new_sheet, insert_images, download_files);
+- если числа складываются, стоит aggregate или subtotals, а не join_values;
+- если строки-итоги есть в исходном отчёте, отдельный шаг для них не нужен;
+- ответ — валидный JSON, параметры шага лежат прямо в шаге.
+
 ## Примеры правильных сценариев
 
 Пример 1. Задача: «Собери ссылки из колонки F в одну ячейку через перенос строки».
+Файл один: результат записывается в ту же таблицу, поэтому "template": "input".
 
 {"recipe": {"schema": "excelmaster/recipe/1", "name": "Ссылки через перенос строки",
 "description": "Собирает ссылки из колонки F через перенос строки",
@@ -211,7 +260,7 @@ final class Prompts
    "columns": {"key": "B", "links": "F"}, "multi": "first", "skip_if_empty": ["links"]},
   {"op": "map_field", "field": "links",
    "transform": {"trim": true, "regex_replace": {"pattern": "~\\s*;\\s*~", "replacement": "\\n"}}},
-  {"op": "write_cells", "template": "template", "sheet": 1, "data_from_row": 6,
+  {"op": "write_cells", "template": "input", "sheet": 1, "data_from_row": 6,
    "match": {"column": "B", "field": "key"}, "cells": {"F": "links"},
    "wrap_text": ["F"], "vertical_align": "top", "output": "результат.xlsx"}
 ]},
@@ -328,9 +377,12 @@ PROMPT;
     /**
      * @param array<string, mixed> $profile
      * @param array<int, array{role: string, content: string}> $history
-     * @param array<string, mixed>|null $lookupProfile профиль второго файла (справочника), если приложен
+     * @param array<string, mixed> $context {
+     *     file_mode: single|lookup|template,
+     *     second_alias: ?string, second_name: string, second_profile: ?array
+     * }
      */
-    public static function user(string $task, array $profile, array $history = [], ?array $lookupProfile = null): string
+    public static function user(string $task, array $profile, array $history = [], array $context = []): string
     {
         $parts = [];
 
@@ -346,18 +398,45 @@ PROMPT;
         $parts[] = '## Задача';
         $parts[] = $task;
         $parts[] = '';
+
+        $fileMode = \App\Lib\RecipeInputs::modeFrom($context['file_mode'] ?? 'single');
+        $secondAlias = $context['second_alias'] ?? null;
+        $secondName = trim((string) ($context['second_name'] ?? ''));
+
+        $parts[] = '## Входные файлы';
+        if ($fileMode === 'lookup') {
+            $parts[] = 'Пользователь приложил ДВА файла: основная таблица с данными — псевдоним "input",'
+                . ' справочник (прайс, остатки) — псевдоним "lookup".'
+                . ($secondName !== '' ? ' Имя файла-справочника: ' . $secondName . '.' : '');
+        } elseif ($fileMode === 'template') {
+            $parts[] = 'Пользователь приложил ДВА файла: таблица с данными — псевдоним "input",'
+                . ' шаблон, который нужно заполнить, — псевдоним "template".'
+                . ($secondName !== '' ? ' Имя файла-шаблона: ' . $secondName . '.' : '');
+        } else {
+            $parts[] = 'У пользователя ОДИН файл: он и таблица с данными, и результат.'
+                . ' Используй только псевдоним "input"; для записи в ту же таблицу указывай'
+                . ' "template": "input". Второй файл ("lookup" или отдельный "template") не добавляй.';
+        }
+        $parts[] = '';
+
         $parts[] = '## Профиль файла-образца';
         $parts[] = \App\Lib\Profiler::toPromptText($profile);
 
-        if ($lookupProfile !== null) {
+        $secondProfile = $context['second_profile'] ?? null;
+        if (is_array($secondProfile)) {
             $parts[] = '';
-            $parts[] = '## Профиль файла-справочника (второй файл)';
-            $parts[] = 'Пользователь приложил второй файл. Если по задаче данные нужно взять из него'
-                . ' (цены, наименования, остатки), используй операцию lookup_field с "file": "lookup",'
-                . ' взяв колонки строго из этого профиля. Если второй файл для задачи не нужен —'
-                . ' просто не используй его.';
+            $parts[] = $secondAlias === 'template'
+                ? '## Профиль файла-шаблона (второй файл)'
+                : '## Профиль файла-справочника (второй файл)';
+            $parts[] = $secondAlias === 'template'
+                ? 'Это шаблон, который нужно заполнить: используй операцию write_cells или insert_images'
+                    . ' с "template": "template", взяв колонки шаблона строго из этого профиля.'
+                : 'Пользователь приложил второй файл. Если по задаче данные нужно взять из него'
+                    . ' (цены, наименования, остатки), используй операцию lookup_field с "file": "lookup",'
+                    . ' взяв колонки строго из этого профиля. Если второй файл для задачи не нужен —'
+                    . ' просто не используй его.';
             $parts[] = '';
-            $parts[] = \App\Lib\Profiler::toPromptText($lookupProfile);
+            $parts[] = \App\Lib\Profiler::toPromptText($secondProfile);
         }
 
         return implode("\n", $parts);

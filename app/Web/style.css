@@ -3,7 +3,9 @@
     --panel: #ffffff;
     --border: #dfe3e8;
     --text: #1f2933;
-    --muted: #6b7684;
+    /* Серый для пояснений. Прежний #6b7684 на фоне страницы давал 4,26:1 —
+       ниже порога WCAG AA (4,5:1) для мелкого текста; этот даёт около 6:1. */
+    --muted: #52606d;
     --accent: #2f6f4f;
     --accent-hover: #245740;
     --warn-bg: #fff8e1;
@@ -12,6 +14,30 @@
     --danger-bg: #fdecea;
     --ok-bg: #e8f5ee;
     --radius: 10px;
+
+    /* Размер текста: настройки → «Внешний вид». Все кегли считаются от --scale,
+       поэтому «Крупный» и «Очень крупный» увеличивают текст целиком, а не по частям.
+       Класс масштаба ставится на <html> (см. app.js, applyUiScale): значения --fs-*
+       вычисляются там, где объявлены, поэтому и --scale нужно переопределять
+       на том же элементе — на :root. С классом на <body> кегли не менялись. */
+    --scale: 1;
+    --fs-base: calc(16px * var(--scale));
+    --fs-h2: calc(20px * var(--scale));
+    --fs-h3: calc(17px * var(--scale));
+    --fs-hint: calc(15px * var(--scale));
+    --fs-label: calc(15px * var(--scale));
+    --fs-table: calc(14px * var(--scale));
+    --fs-badge: calc(12px * var(--scale));
+    --fs-log: calc(13px * var(--scale));
+    --control-height: calc(44px * var(--scale));
+}
+
+html.scale-large {
+    --scale: 1.15;
+}
+
+html.scale-xlarge {
+    --scale: 1.3;
 }
 
 * {
@@ -21,7 +47,8 @@
 body {
     margin: 0;
     font-family: 'Segoe UI', Tahoma, sans-serif;
-    font-size: 14px;
+    font-size: var(--fs-base);
+    line-height: 1.5;
     color: var(--text);
     background: var(--bg);
     overflow-wrap: break-word;
@@ -38,13 +65,13 @@ header {
 }
 
 header h1 {
-    font-size: 17px;
+    font-size: calc(19px * var(--scale));
     margin: 0;
     font-weight: 600;
 }
 
 header .app-subtitle {
-    font-size: 12px;
+    font-size: var(--fs-badge);
     color: var(--muted);
     border-left: 1px solid var(--border);
     padding-left: 16px;
@@ -56,7 +83,7 @@ header .spacer {
 }
 
 .storage {
-    font-size: 12px;
+    font-size: var(--fs-badge);
     color: var(--muted);
     min-width: 0;
 }
@@ -81,7 +108,7 @@ nav button {
     border: none;
     background: transparent;
     padding: 10px 16px;
-    font-size: 14px;
+    font-size: var(--fs-base);
     cursor: pointer;
     color: var(--muted);
     border-bottom: 2px solid transparent;
@@ -110,25 +137,25 @@ main {
 
 .panel h2 {
     margin: 0 0 6px;
-    font-size: 16px;
+    font-size: var(--fs-h2);
 }
 
 .panel h3 {
     margin: 18px 0 8px;
-    font-size: 14px;
+    font-size: var(--fs-h3);
 }
 
 .panel p.hint {
     color: var(--muted);
     margin: 0 0 14px;
-    font-size: 13px;
+    font-size: var(--fs-hint);
 }
 
 label {
     display: block;
     font-weight: 600;
     margin: 12px 0 4px;
-    font-size: 13px;
+    font-size: var(--fs-label);
 }
 
 input[type="text"],
@@ -137,7 +164,8 @@ input[type="password"],
 select,
 textarea {
     width: 100%;
-    padding: 9px 10px;
+    min-height: var(--control-height);
+    padding: 11px 12px;
     border: 1px solid var(--border);
     border-radius: 6px;
     font: inherit;
@@ -172,9 +200,10 @@ button.primary {
     background: var(--accent);
     color: #fff;
     border: none;
-    padding: 10px 18px;
+    padding: 12px 20px;
     border-radius: 6px;
     font: inherit;
+    font-size: var(--fs-base);
     cursor: pointer;
 }
 
@@ -190,9 +219,10 @@ button.primary:disabled {
 button.ghost {
     background: #fff;
     border: 1px solid var(--border);
-    padding: 8px 14px;
+    padding: 10px 16px;
     border-radius: 6px;
     font: inherit;
+    font-size: var(--fs-base);
     cursor: pointer;
     color: var(--text);
 }
@@ -217,7 +247,7 @@ button.danger {
     border-radius: 8px;
     padding: 12px 14px;
     margin: 14px 0;
-    font-size: 13px;
+    font-size: var(--fs-hint);
     border: 1px solid transparent;
 }
 
@@ -249,7 +279,7 @@ button.danger {
 table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--fs-table);
 }
 
 .table-wrap {
@@ -262,12 +292,21 @@ table {
 th,
 td {
     text-align: left;
-    padding: 7px 9px;
+    padding: 9px 11px;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
     max-width: 340px;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* В таблицах предпросмотра значения показываем целиком: с крупным шрифтом
+   обрезка «…» прячет как раз то, что пользователь проверяет */
+.table-wrap th,
+.table-wrap td {
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
 }
 
 th {
@@ -294,18 +333,18 @@ th {
 
 .card h3 {
     margin: 0 0 6px;
-    font-size: 15px;
+    font-size: var(--fs-h3);
 }
 
 .card .desc {
     color: var(--muted);
-    font-size: 13px;
+    font-size: var(--fs-hint);
     flex: 1;
     margin-bottom: 10px;
 }
 
 .card .meta {
-    font-size: 12px;
+    font-size: var(--fs-badge);
     color: var(--muted);
     display: flex;
     gap: 10px;
@@ -315,8 +354,8 @@ th {
 
 .badge {
     display: inline-block;
-    font-size: 11px;
-    padding: 2px 7px;
+    font-size: var(--fs-badge);
+    padding: 3px 8px;
     border-radius: 10px;
     background: #eef1f4;
     color: var(--muted);
@@ -338,7 +377,7 @@ th {
     border-radius: 8px;
     padding: 12px;
     font-family: Consolas, monospace;
-    font-size: 12px;
+    font-size: var(--fs-log);
     max-height: 320px;
     overflow-y: auto;
     white-space: pre-wrap;
@@ -364,7 +403,7 @@ th {
 .chat .msg {
     padding: 10px 12px;
     border-radius: 8px;
-    font-size: 13px;
+    font-size: var(--fs-hint);
     max-width: 85%;
 }
 
@@ -390,7 +429,7 @@ details {
 summary {
     cursor: pointer;
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--fs-label);
     color: var(--muted);
 }
 
@@ -400,7 +439,7 @@ pre.json {
     padding: 12px;
     border-radius: 8px;
     overflow-x: auto;
-    font-size: 12px;
+    font-size: var(--fs-log);
     max-height: 340px;
 }
 
@@ -429,18 +468,43 @@ pre.json {
     flex-wrap: wrap;
 }
 
+/* Подсказки-примеры задач: нажатие подставляет текст в поле описания */
+button.chip {
+    background: #eef1f4;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 7px 13px;
+    font: inherit;
+    font-size: var(--fs-badge);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+}
+
+button.chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: #fff;
+}
+
+.chips .chips-title {
+    flex-basis: 100%;
+    font-size: var(--fs-badge);
+    color: var(--muted);
+}
+
 .tag {
     background: #eef1f4;
     border-radius: 12px;
-    padding: 3px 10px;
-    font-size: 12px;
+    padding: 4px 11px;
+    font-size: var(--fs-badge);
 }
 
 .file-list {
     list-style: none;
     padding: 0;
     margin: 8px 0 0;
-    font-size: 13px;
+    font-size: var(--fs-hint);
     max-height: 240px;
     overflow-y: auto;
 }
@@ -459,7 +523,7 @@ pre.json {
 
 /* Таблица «параметр — значение»: как свойства в 1С, для страницы «О программе» */
 table.kv {
-    font-size: 13px;
+    font-size: var(--fs-table);
     border: 1px solid var(--border);
     border-radius: 8px;
 }
@@ -503,7 +567,7 @@ ol.steps code,
     padding: 1px 5px;
     border-radius: 4px;
     font-family: Consolas, monospace;
-    font-size: 12px;
+    font-size: var(--fs-badge);
 }
 
 /*
@@ -532,7 +596,7 @@ ol.steps code,
 
     nav button {
         padding: 9px 12px;
-        font-size: 13px;
+        font-size: calc(15px * var(--scale));
     }
 
     main {

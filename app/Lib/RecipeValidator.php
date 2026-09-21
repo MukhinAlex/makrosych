@@ -96,6 +96,16 @@ final class RecipeValidator
             $warnings[] = 'Сценарий не создаёт ни одного файла результата';
         }
 
+        // Входные файлы: если они объявлены, шаг не может взять файл «из ниоткуда»
+        $declared = self::declaredAliases($recipe);
+        if ($declared !== []) {
+            foreach (self::fileAliases($recipe) as $alias) {
+                if (!in_array($alias, $declared, true)) {
+                    $errors[] = "Сценарий использует файл «{$alias}», но он не объявлен во входах";
+                }
+            }
+        }
+
         return [
             'ok' => $errors === [],
             'errors' => $errors,
@@ -104,6 +114,49 @@ final class RecipeValidator
             'uses_network' => $usesNetwork,
             'ops' => $ops,
         ];
+    }
+
+    /**
+     * Псевдонимы входных файлов, которые использует сценарий.
+     *
+     * @param array<string, mixed> $recipe
+     * @return array<int, string>
+     */
+    public static function fileAliases(array $recipe): array
+    {
+        $aliases = [];
+        foreach ((array) ($recipe['steps'] ?? []) as $step) {
+            if (!is_array($step)) {
+                continue;
+            }
+
+            foreach (['file', 'template'] as $key) {
+                $value = $step[$key] ?? null;
+                if (is_string($value) && $value !== '') {
+                    $aliases[$value] = true;
+                }
+            }
+        }
+
+        return array_keys($aliases);
+    }
+
+    /**
+     * Псевдонимы, объявленные во входах сценария.
+     *
+     * @param array<string, mixed> $recipe
+     * @return array<int, string>
+     */
+    public static function declaredAliases(array $recipe): array
+    {
+        $aliases = [];
+        foreach ((array) ($recipe['inputs'] ?? []) as $item) {
+            if (is_array($item) && isset($item['alias'])) {
+                $aliases[] = (string) $item['alias'];
+            }
+        }
+
+        return $aliases;
     }
 
     /**

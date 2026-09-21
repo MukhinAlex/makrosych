@@ -890,6 +890,43 @@ check('локальный путь и текст ссылкой не счита�
 check('неполные и неподдерживаемые адреса отклоняются',
     !Http::isUrl('https://') && !Http::isUrl('ftp://site.ru/a.jpg'));
 
+// Публичные ссылки облаков: Яндекс Диск и Облако Mail.ru отдают страницу, а не файл
+check('ссылка Облака Mail.ru распознаётся',
+    Http::isMailRu('https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ')
+    && !Http::isMailRu('https://news.mail.ru/news/1.html')
+    && !Http::isMailRu('https://disk.yandex.ru/i/abc'));
+check('ссылки облаков отличаются от обычных ссылок',
+    Http::isCloud('https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ')
+    && Http::isCloud('https://yadi.sk/i/QgQ6fFZ_d6Cp9Q')
+    && !Http::isCloud('https://site.ru/фото/1.jpg'));
+check('идентификатор публичной ссылки Mail.ru разобран',
+    Http::mailRuWeblink('https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ') === '7B2u/d9Vu3d4TQ'
+    && Http::mailRuWeblink('https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ/Ширма/фото.jpg') === '7B2u/d9Vu3d4TQ/Ширма/фото.jpg',
+    Http::mailRuWeblink('https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ'));
+check('непубличная ссылка Mail.ru идентификатора не даёт',
+    Http::mailRuWeblink('https://cloud.mail.ru/home') === ''
+    && Http::mailRuWeblink('https://site.ru/public/a/b') === '');
+
+$plainResolve = Http::resolve('https://site.ru/фото/1.jpg');
+check('обычная ссылка разрешается в саму себя',
+    $plainResolve['success'] && count($plainResolve['files']) === 1
+    && $plainResolve['files'][0]['name'] === '1.jpg',
+    (string) json_encode($plainResolve['files'], JSON_UNESCAPED_UNICODE));
+
+$badMailRu = Http::resolve('https://cloud.mail.ru/home');
+check('ссылка Mail.ru без публичного адреса отклонена с понятной причиной',
+    $badMailRu['success'] === false && str_contains($badMailRu['error'], 'публичная ссылка'),
+    $badMailRu['error']);
+
+// Страница вместо файла: проверяется на живом сервере в apitest.php, здесь — правило расширений
+check('расширения, для которых HTML — это файл, перечислены',
+    (static function (): bool {
+        $reflection = new ReflectionClass(Http::class);
+        $extensions = $reflection->getConstant('TEXT_EXTENSIONS');
+
+        return is_array($extensions) && in_array('html', $extensions, true) && in_array('csv', $extensions, true);
+    })());
+
 $notImage = Paths::tmpDir('notimage') . '/страница.html';
 Paths::ensure(dirname($notImage));
 file_put_contents($notImage, '<html><body>404</body></html>');
@@ -1824,6 +1861,369 @@ check('в подсказке есть операция subtotals', str_contains(
 check('в подсказке описаны промежуточные итоги', str_contains($prompt, 'subtotals, правило 24'));
 check('в подсказке сказано не дублировать общий итог у write_new_sheet',
     str_contains($prompt, 'общий итог уже добавлен'));
+
+// ------------------------------------------------------------------ сколько файлов нужно задаче
+
+echo "\n== 15. Сколько файлов нужно задаче ==\n";
+
+$oneFileRecipe = [
+    'schema' => 'excelmaster/recipe/1',
+    'name' => 'Правка таблицы на месте',
+    'description' => 'Читает таблицу и записывает результат в неё же',
+    'steps' => [
+        ['op' => 'read_rows', 'file' => 'input', 'sheet' => 1, 'data_from_row' => 2,
+            'columns' => ['key' => 'B'], 'multi' => 'first'],
+        ['op' => 'write_cells', 'template' => 'template', 'sheet' => 1, 'data_from_row' => 2,
+            'match' => ['column' => 'B', 'field' => 'key'], 'cells' => ['F' => 'key'],
+            'output' => 'результат.xlsx'],
+    ],
+];
+
+$oneFileInputs = \App\Lib\RecipeInputs::describe($oneFileRecipe, 'single');
+check('сценарий для одного файла объявляет два псевдонима', count($oneFileInputs) === 2,
+    'входов: ' . count($oneFileInputs));
+check('для одного файла второе поле берёт файл у основного',
+    (string) ($oneFileInputs[1]['same_as'] ?? '') === 'input',
+    (string) ($oneFileInputs[1]['same_as'] ?? 'нет'));
+check('для одного файла поле в окне запуска одно',
+    count(\App\Lib\RecipeInputs::primary($oneFileInputs)) === 1,
+    'полей: ' . count(\App\Lib\RecipeInputs::primary($oneFileInputs)));
+check('подписи полей понятны без псевдонимов',
+    (string) $oneFileInputs[0]['label'] === 'Ваша таблица'
+    && (string) $oneFileInputs[1]['label'] === 'Шаблон',
+    $oneFileInputs[0]['label'] . ' / ' . $oneFileInputs[1]['label']);
+
+$twoFileInputs = \App\Lib\RecipeInputs::describe($oneFileRecipe, 'template');
+check('для задачи с шаблоном два отдельных поля',
+    count(\App\Lib\RecipeInputs::primary($twoFileInputs)) === 2,
+    'полей: ' . count(\App\Lib\RecipeInputs::primary($twoFileInputs)));
+check('для задачи с шаблоном шаблон не берётся у основного файла',
+    !isset($twoFileInputs[1]['same_as']));
+
+$lookupRecipeInputs = \App\Lib\RecipeInputs::describe($lookupRecipe, 'lookup');
+check('для задачи со справочником справочник отдельным полем',
+    (string) ($lookupRecipeInputs[1]['alias'] ?? '') === 'lookup'
+    && !isset($lookupRecipeInputs[1]['same_as']),
+    (string) ($lookupRecipeInputs[1]['alias'] ?? 'нет'));
+check('подпись справочника берётся из сценария, если она задана',
+    (string) ($lookupRecipeInputs[1]['label'] ?? '') === 'Прайс',
+    (string) ($lookupRecipeInputs[1]['label'] ?? 'нет'));
+check('без своей подписи поле называется словами',
+    \App\Lib\RecipeInputs::label('lookup', []) === 'Файл-справочник (прайс)'
+    && \App\Lib\RecipeInputs::label('template', []) === 'Шаблон'
+    && \App\Lib\RecipeInputs::label('input', []) === 'Ваша таблица',
+    \App\Lib\RecipeInputs::label('lookup', []));
+
+check('порядок полей: таблица, шаблон, справочник',
+    \App\Lib\RecipeInputs::order(['lookup', 'other', 'template', 'input']) === ['input', 'template', 'lookup', 'other'],
+    implode(',', \App\Lib\RecipeInputs::order(['lookup', 'other', 'template', 'input'])));
+
+// Сценарий, объявивший входы, не может взять файл «из ниоткуда»
+$undeclared = $oneFileRecipe;
+$undeclared['inputs'] = [['alias' => 'input', 'label' => 'Ваша таблица']];
+$undeclaredCheck = RecipeValidator::validate($undeclared);
+check('необъявленный вход отклоняется',
+    $undeclaredCheck['ok'] === false
+    && str_contains(implode(' ', $undeclaredCheck['errors']), 'не объявлен во входах'),
+    implode('; ', $undeclaredCheck['errors']));
+check('объявленные входы проверку проходят',
+    RecipeValidator::validate($oneFileRecipe + ['inputs' => $oneFileInputs])['ok'] === true,
+    implode('; ', RecipeValidator::validate($oneFileRecipe + ['inputs' => $oneFileInputs])['errors']));
+
+check('псевдонимы файлов сценария собраны',
+    RecipeValidator::fileAliases($oneFileRecipe) === ['input', 'template'],
+    implode(',', RecipeValidator::fileAliases($oneFileRecipe)));
+
+// Подсказка для нейросети: сколько файлов у пользователя
+$onePrompt = Prompts::user('Разложи ссылки по строкам', ['columns' => []], [], ['file_mode' => 'single']);
+check('в запросе сказано, что файл один', str_contains($onePrompt, 'У пользователя ОДИН файл'),
+    $onePrompt);
+check('в запросе сказано писать в тот же файл',
+    str_contains($onePrompt, '"template": "input"'));
+check('в запросе запрещён лишний второй файл',
+    str_contains($onePrompt, 'Второй файл ("lookup" или отдельный "template") не добавляй'));
+
+$lookupPrompt = Prompts::user('Возьми цены из прайса', ['columns' => []], [], [
+    'file_mode' => 'lookup',
+    'second_alias' => 'lookup',
+    'second_name' => 'прайс.xlsx',
+    'second_profile' => ['columns' => []],
+]);
+check('в запросе сказано, что файлов два', str_contains($lookupPrompt, 'ДВА файла'));
+check('в запросе назван псевдоним справочника', str_contains($lookupPrompt, 'псевдоним "lookup"'));
+check('в запросе назван профиль справочника',
+    str_contains($lookupPrompt, '## Профиль файла-справочника (второй файл)'));
+
+$templatePrompt = Prompts::user('Заполни шаблон', ['columns' => []], [], [
+    'file_mode' => 'template',
+    'second_alias' => 'template',
+    'second_name' => 'шаблон.xlsx',
+    'second_profile' => ['columns' => []],
+]);
+check('в запросе назван профиль шаблона',
+    str_contains($templatePrompt, '## Профиль файла-шаблона (второй файл)')
+    && str_contains($templatePrompt, 'псевдоним "template"'));
+
+$systemPrompt = Prompts::system();
+check('в подсказке есть правило о числе файлов',
+    str_contains($systemPrompt, 'СКОЛЬКО ФАЙЛОВ НУЖНО ПОЛЬЗОВАТЕЛЮ'));
+check('в подсказке есть самопроверка перед ответом',
+    str_contains($systemPrompt, 'Перед ответом проверь себя'));
+check('в подсказке разрешено писать в тот же файл',
+    str_contains($systemPrompt, 'и "input", если результат записывается в ту же таблицу'));
+
+// ------------------------------------------------------------------ дубликаты, сортировка, диаграммы
+
+echo "\n== 16. Дубликаты, сортировка, диаграммы ==\n";
+
+$dedupeDir = Paths::tmpDir('dedupe');
+Paths::ensure($dedupeDir);
+$dedupeSample = $dedupeDir . '/повторы.xlsx';
+
+$dedupeBook = Excel::newSpreadsheet();
+$dedupeSheet = $dedupeBook->getActiveSheet();
+$dedupeSheet->fromArray([
+    ['Артикул', 'Город', 'Сумма', 'Отметка'],
+    ['100', 'Москва', 50, 'первая'],
+    ['100', 'Москва', 30, 'вторая'],
+    ['200', 'Питер', 10, 'первая'],
+    ['200', 'Питер', 20, 'вторая'],
+    ['300', 'Казань', 90, 'единственная'],
+    ['', 'Не указан', 5, 'без артикула'],
+], null, 'A1');
+Excel::save($dedupeBook, $dedupeSample);
+$dedupeBook->disconnectWorksheets();
+
+$dedupeRecipe = [
+    'schema' => RecipeValidator::SCHEMA,
+    'name' => 'Проверка удаления дубликатов',
+    'steps' => [
+        ['op' => 'read_rows', 'file' => 'input', 'sheet' => 1, 'data_from_row' => 2,
+            'columns' => ['article' => 'A', 'city' => 'B', 'sum' => 'C', 'mark' => 'D'], 'multi' => 'first'],
+        ['op' => 'dedupe', 'by' => 'article', 'count_field' => 'repeats'],
+        ['op' => 'write_new_sheet', 'output' => 'без-повторов.xlsx', 'columns' => [
+            ['column' => 'A', 'title' => 'Артикул', 'field' => 'article'],
+            ['column' => 'B', 'title' => 'Повторов', 'field' => 'repeats'],
+            ['column' => 'C', 'title' => 'Отметка', 'field' => 'mark'],
+        ]],
+    ],
+];
+
+$dedupeCheck = RecipeValidator::validate($dedupeRecipe);
+check('сценарий с удалением дубликатов прошёл проверку', $dedupeCheck['ok'], implode('; ', $dedupeCheck['errors']));
+
+$dedupeResult = Runner::execute($dedupeRecipe, ['inputs' => ['input' => $dedupeSample]]);
+check('обработка с удалением дубликатов выполнена', $dedupeResult['ok'], (string) $dedupeResult['error']);
+
+$dedupeRows = $dedupeResult['preview']['rows'] ?? [];
+check('осталась одна строка на артикул', count($dedupeRows) === 4, 'строк: ' . count($dedupeRows));
+check('первая строка ключа сохранена',
+    (string) ($dedupeRows[0]['mark'] ?? '') === 'первая', (string) ($dedupeRows[0]['mark'] ?? 'нет'));
+check('число повторов посчитано',
+    (int) ($dedupeRows[0]['repeats'] ?? 0) === 2 && (int) ($dedupeRows[2]['repeats'] ?? 0) === 1,
+    'первый: ' . ($dedupeRows[0]['repeats'] ?? 'нет') . ', третий: ' . ($dedupeRows[2]['repeats'] ?? 'нет'));
+check('строка без ключа сохранена, а не склеена',
+    (string) ($dedupeRows[3]['mark'] ?? '') === 'без артикула', (string) ($dedupeRows[3]['mark'] ?? 'нет'));
+check('в статистике отражено число убранных строк',
+    (int) ($dedupeResult['summary']['stats']['убрано дубликатов'] ?? 0) === 2,
+    'убрано: ' . ($dedupeResult['summary']['stats']['убрано дубликатов'] ?? 'нет'));
+
+$dedupeLastRecipe = $dedupeRecipe;
+$dedupeLastRecipe['name'] = 'Дубликаты: оставить последнюю';
+$dedupeLastRecipe['steps'][1]['keep'] = 'last';
+$dedupeLastRecipe['steps'][2]['output'] = 'последние.xlsx';
+$dedupeLast = Runner::execute($dedupeLastRecipe, ['inputs' => ['input' => $dedupeSample]]);
+check('при keep=last остаётся последняя строка ключа',
+    $dedupeLast['ok'] && (string) (($dedupeLast['preview']['rows'][0] ?? [])['mark'] ?? '') === 'вторая',
+    (string) (($dedupeLast['preview']['rows'][0] ?? [])['mark'] ?? (string) $dedupeLast['error']));
+
+$dedupeSortRecipe = $dedupeRecipe;
+$dedupeSortRecipe['name'] = 'Дубликаты и сортировка';
+$dedupeSortRecipe['steps'][1]['sort'] = true;
+$dedupeSortRecipe['steps'][2]['output'] = 'по-ключу.xlsx';
+$dedupeSorted = Runner::execute($dedupeSortRecipe, ['inputs' => ['input' => $dedupeSample]]);
+$sortedKeys = array_map(
+    static fn (array $row) => (string) ($row['article'] ?? ''),
+    $dedupeSorted['preview']['rows'] ?? []
+);
+check('результат удаления дубликатов сортируется по ключу',
+    $dedupeSorted['ok'] && $sortedKeys === ['', '100', '200', '300'],
+    implode(', ', $sortedKeys) ?: (string) $dedupeSorted['error']);
+
+// Сортировка по значению — основа ABC-анализа
+$sortRecipe = [
+    'schema' => RecipeValidator::SCHEMA,
+    'name' => 'Проверка сортировки',
+    'steps' => [
+        ['op' => 'read_rows', 'file' => 'input', 'sheet' => 1, 'data_from_row' => 2,
+            'columns' => ['article' => 'A', 'sum' => 'C'], 'multi' => 'first'],
+        ['op' => 'group_by', 'by' => 'article'],
+        ['op' => 'aggregate', 'map' => ['total' => ['field' => 'sum', 'agg' => 'sum']]],
+        ['op' => 'sort_rows', 'by' => 'total', 'dir' => 'desc', 'numeric' => true],
+        ['op' => 'write_new_sheet', 'output' => 'по-убыванию.xlsx', 'columns' => [
+            ['column' => 'A', 'title' => 'Артикул', 'field' => 'article'],
+            ['column' => 'B', 'title' => 'Сумма', 'field' => 'total'],
+        ]],
+    ],
+];
+
+$sortResult = Runner::execute($sortRecipe, ['inputs' => ['input' => $dedupeSample]]);
+check('сортировка по убыванию выполнена', $sortResult['ok'], (string) $sortResult['error']);
+$sortRows = $sortResult['preview']['rows'] ?? [];
+check('строки идут от большей суммы к меньшей',
+    (string) ($sortRows[0]['article'] ?? '') === '300' && (string) ($sortRows[1]['article'] ?? '') === '100',
+    'порядок: ' . implode(', ', array_map(static fn (array $row) => (string) ($row['article'] ?? ''), $sortRows)));
+
+$sortAscRecipe = $sortRecipe;
+$sortAscRecipe['name'] = 'Проверка сортировки по возрастанию';
+$sortAscRecipe['steps'][3] = ['op' => 'sort_rows', 'by' => 'total', 'numeric' => true];
+$sortAscRecipe['steps'][4]['output'] = 'по-возрастанию.xlsx';
+$sortAsc = Runner::execute($sortAscRecipe, ['inputs' => ['input' => $dedupeSample]]);
+$ascTotals = array_map(
+    static fn (array $row) => (float) ($row['total'] ?? 0),
+    $sortAsc['preview']['rows'] ?? []
+);
+check('сортировка по возрастанию выполнена',
+    $sortAsc['ok'] && $ascTotals === [5.0, 30.0, 80.0, 90.0],
+    implode(', ', $ascTotals) ?: (string) $sortAsc['error']);
+
+$sortTextRecipe = $sortRecipe;
+$sortTextRecipe['name'] = 'Проверка сортировки текста';
+$sortTextRecipe['steps'][3] = ['op' => 'sort_rows', 'by' => 'article'];
+$sortTextRecipe['steps'][4]['output'] = 'по-алфавиту.xlsx';
+$sortText = Runner::execute($sortTextRecipe, ['inputs' => ['input' => $dedupeSample]]);
+check('текст сортируется по алфавиту',
+    $sortText['ok'] && (string) (($sortText['preview']['rows'][0] ?? [])['article'] ?? '') === '100',
+    (string) (($sortText['preview']['rows'][0] ?? [])['article'] ?? (string) $sortText['error']));
+
+// Диаграмма по готовому результату
+$chartRecipe = $sortRecipe;
+$chartRecipe['name'] = 'Свод с диаграммой';
+$chartRecipe['steps'][] = ['op' => 'insert_chart', 'source' => 'по-убыванию.xlsx', 'output' => 'с-диаграммой.xlsx',
+    'type' => 'bar', 'title' => 'Сумма по артикулам', 'categories' => 'A',
+    'series' => ['B' => 'Сумма'], 'data_from_row' => 2];
+
+$chartValidation = RecipeValidator::validate($chartRecipe);
+check('сценарий с диаграммой прошёл проверку', $chartValidation['ok'], implode('; ', $chartValidation['errors']));
+
+$chartResult = Runner::execute($chartRecipe, ['inputs' => ['input' => $dedupeSample]]);
+check('обработка с диаграммой выполнена', $chartResult['ok'], (string) $chartResult['error']);
+check('в статистике учтена диаграмма',
+    (int) ($chartResult['summary']['stats']['диаграмм'] ?? 0) === 1,
+    'диаграмм: ' . ($chartResult['summary']['stats']['диаграмм'] ?? 'нет'));
+
+$chartFile = '';
+foreach ($chartResult['preview']['files'] ?? [] as $file) {
+    if (($file['kind'] ?? '') === 'chart') {
+        $chartFile = (string) ($file['path'] ?? '');
+    }
+}
+check('файл с диаграммой создан', $chartFile !== '' && is_file($chartFile), $chartFile);
+
+if ($chartFile !== '' && is_file($chartFile)) {
+    // Диаграмма — часть формата xlsx: проверяем, что она действительно записана
+    $zip = new ZipArchive();
+    $chartXml = '';
+    if ($zip->open($chartFile) === true) {
+        $chartXml = (string) $zip->getFromName('xl/charts/chart1.xml');
+        $zip->close();
+    }
+
+    check('диаграмма записана в файл', $chartXml !== '', 'части xl/charts/chart1.xml нет');
+    check('вид диаграммы — столбчатая', str_contains($chartXml, 'barChart'));
+    check('диаграмма ссылается на колонку значений', str_contains($chartXml, '$B$2:$B$5'), $chartXml);
+    check('подписи взяты из колонки категорий', str_contains($chartXml, '$A$2:$A$5'));
+    check('название диаграммы записано', str_contains($chartXml, 'Сумма по артикулам'));
+    check('подпись серии записана', str_contains($chartXml, '<c:v>Сумма</c:v>'));
+
+    // Excel покажет диаграмму, только если она связана с листом в частях книги
+    $zip = new ZipArchive();
+    $sheetRels = '';
+    $drawingRels = '';
+    if ($zip->open($chartFile) === true) {
+        $sheetRels = (string) $zip->getFromName('xl/worksheets/_rels/sheet1.xml.rels');
+        $drawingRels = (string) $zip->getFromName('xl/drawings/_rels/drawing1.xml.rels');
+        $zip->close();
+    }
+    check('лист ссылается на область с диаграммой', str_contains($sheetRels, 'drawing1.xml'));
+    check('область ссылается на файл диаграммы', str_contains($drawingRels, '../charts/chart1.xml'));
+
+    $chartBack = Excel::load($chartFile, false);
+    check('файл с диаграммой открывается',
+        $chartBack->getSheet(0)->getHighestDataRow() === 5,
+        'строк: ' . $chartBack->getSheet(0)->getHighestDataRow());
+    check('данные в файле сохранены',
+        (string) $chartBack->getSheet(0)->getCell('A2')->getValue() === '300',
+        (string) $chartBack->getSheet(0)->getCell('A2')->getValue());
+    $chartBack->disconnectWorksheets();
+}
+
+$pieRecipe = $chartRecipe;
+$pieRecipe['name'] = 'Круговая диаграмма';
+$pieRecipe['steps'][count($pieRecipe['steps']) - 1]['type'] = 'pie';
+$pieRecipe['steps'][count($pieRecipe['steps']) - 1]['output'] = 'круговая.xlsx';
+$pieResult = Runner::execute($pieRecipe, ['inputs' => ['input' => $dedupeSample]]);
+check('круговая диаграмма построена', $pieResult['ok'], (string) $pieResult['error']);
+$pieFile = '';
+foreach ($pieResult['preview']['files'] ?? [] as $file) {
+    if (($file['kind'] ?? '') === 'chart') {
+        $pieFile = (string) ($file['path'] ?? '');
+    }
+}
+$pieXml = '';
+if ($pieFile !== '' && is_file($pieFile)) {
+    $zip = new ZipArchive();
+    if ($zip->open($pieFile) === true) {
+        $pieXml = (string) $zip->getFromName('xl/charts/chart1.xml');
+        $zip->close();
+    }
+}
+check('вид круговой диаграммы записан', str_contains($pieXml, 'pieChart'));
+
+// В режиме проверки файлы не создаются
+$chartDry = Runner::execute($chartRecipe, ['dry_run' => true, 'inputs' => ['input' => $dedupeSample]]);
+check('проверка сценария с диаграммой проходит без файлов',
+    $chartDry['ok'] && (int) ($chartDry['summary']['files'] ?? 0) === 0,
+    'файлов: ' . ($chartDry['summary']['files'] ?? 'нет'));
+
+check('в подсказке есть операции дубликатов, сортировки и диаграмм',
+    str_contains(Prompts::system(), '### dedupe')
+    && str_contains(Prompts::system(), '### sort_rows')
+    && str_contains(Prompts::system(), '### insert_chart'));
+
+// Ссылки облаков в режиме проверки: сеть не нужна, но ссылка помечена как облачная
+$cloudSample = $dedupeDir . '/ссылки.xlsx';
+$cloudBook = Excel::newSpreadsheet();
+$cloudBook->getActiveSheet()->fromArray([
+    ['Группа', 'Ссылка'],
+    ['Щ001', 'https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ'],
+    ['Щ002', 'https://yadi.sk/i/QgQ6fFZ_d6Cp9Q'],
+    ['Щ003', 'https://site.ru/фото/1.jpg'],
+], null, 'A1');
+Excel::save($cloudBook, $cloudSample);
+$cloudBook->disconnectWorksheets();
+
+$cloudRecipe = [
+    'schema' => RecipeValidator::SCHEMA,
+    'name' => 'Проверка ссылок облаков',
+    'steps' => [
+        ['op' => 'read_rows', 'file' => 'input', 'sheet' => 1, 'data_from_row' => 2,
+            'columns' => ['group' => 'A', 'link' => 'B'], 'multi' => 'first'],
+        ['op' => 'download_files', 'url_field' => 'link', 'group_field' => 'group',
+            'path' => '{group}/{index}.{ext}', 'resolve' => true],
+    ],
+];
+
+$cloudDry = Runner::execute($cloudRecipe, ['dry_run' => true, 'inputs' => ['input' => $cloudSample]]);
+$cloudPlanned = array_column($cloudDry['preview']['planned'] ?? [], 'path');
+check('проверка сценария со ссылками облаков проходит без сети',
+    $cloudDry['ok'] && (int) ($cloudDry['summary']['files'] ?? 0) === 0,
+    (string) ($cloudDry['error'] ?? ''));
+check('ссылки облаков помечены как публичные',
+    in_array('публичная ссылка облака будет разрешена', $cloudPlanned, true),
+    implode(', ', $cloudPlanned));
+check('обычная ссылка остаётся обычной',
+    in_array('Щ003/1.jpg', $cloudPlanned, true), implode(', ', $cloudPlanned));
 
 // ------------------------------------------------------------------ итог
 

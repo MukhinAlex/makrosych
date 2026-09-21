@@ -49,7 +49,15 @@ final class Excel
             default => 'Xlsx',
         };
 
-        IOFactory::createWriter($spreadsheet, $writerType)->save($path);
+        $writer = IOFactory::createWriter($spreadsheet, $writerType);
+
+        // Диаграммы попадают в файл только при явном включении: иначе Excel
+        // открывает книгу без них
+        if (method_exists($writer, 'setIncludeCharts')) {
+            $writer->setIncludeCharts(true);
+        }
+
+        $writer->save($path);
     }
 
     public static function newSpreadsheet(): Spreadsheet

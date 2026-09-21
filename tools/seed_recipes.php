@@ -16,6 +16,7 @@ require_once __DIR__ . '/fixtures.php';
 
 use App\Engine\Excel;
 use App\Lib\Paths;
+use App\Lib\RecipeInputs;
 use App\Lib\RecipeValidator;
 use App\Lib\Runner;
 use App\Lib\Store;
@@ -299,6 +300,18 @@ foreach ($definitions as $definition) {
         echo "ПРОПУЩЕН «{$name}»: не найден образец {$sample}\n";
         continue;
     }
+
+    // Сколько файлов нужно сценарию. У готовых сценариев это известно заранее:
+    // если образец используется и как таблица, и как шаблон, файл у задачи один
+    $definitionInputs = (array) ($definition['inputs'] ?? []);
+    $mode = 'single';
+    if (isset($definitionInputs['lookup'])) {
+        $mode = 'lookup';
+    } elseif (isset($definitionInputs['template'])
+        && (string) $definitionInputs['template'] !== (string) ($definitionInputs['input'] ?? '')) {
+        $mode = 'template';
+    }
+    $recipe['inputs'] = RecipeInputs::describe($recipe, $mode);
 
     // Проверка на образце до сохранения
     try {

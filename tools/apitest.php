@@ -11,6 +11,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/app/bootstrap.php';
 require_once __DIR__ . '/fixtures.php';
 
+use App\Lib\Http;
 use App\Lib\Paths;
 use App\Lib\Settings;
 use App\Lib\Store;
@@ -114,13 +115,31 @@ check('API с неверным токеном отклоняет запрос',
 check('ping доступен без токена', (request($base . '/api/?action=ping')['json']['ok'] ?? false) === true);
 
 check('в библиотеке есть место для просмотра образца', str_contains($page['body'], 'recipe-view'));
-check('в новой задаче есть поле файла-справочника',
-    str_contains($page['body'], 'id="lookup-file"') && str_contains($page['body'], 'Файл-справочник'));
-check('в новой задаче есть панель структуры справочника',
-    str_contains($page['body'], 'id="lookup-panel"'));
+check('в новой задаче спрашивают, сколько файлов нужно задаче',
+    str_contains($page['body'], 'id="file-mode"')
+    && str_contains($page['body'], 'Один файл — читаю таблицу и записываю результат в неё же'),
+    'выбора количества файлов нет');
+check('второй файл появляется только для задачи с двумя файлами',
+    str_contains($page['body'], 'id="second-file-block"') && str_contains($page['body'], 'id="second-file"'));
+check('в новой задаче есть панель структуры второго файла',
+    str_contains($page['body'], 'id="lookup-panel"') && str_contains($page['body'], 'id="second-panel-title"'));
 $script = request($base . '/app.js');
 check('скрипт интерфейса отдаётся', $script['status'] === 200 && str_contains($script['body'], 'renderLibrary'),
     'код ' . $script['status']);
+check('подписи второго файла зависят от выбора пользователя',
+    str_contains($script['body'], 'SECOND_FILE_TEXTS')
+    && str_contains($script['body'], 'Файл-справочник (прайс, остатки)')
+    && str_contains($script['body'], 'Файл-шаблон'));
+check('окно запуска показывает поля из входов сценария',
+    str_contains($script['body'], 'runFileFields'));
+check('примеры задач подставляются в описание',
+    str_contains($page['body'], 'id="prompt-examples"')
+    && str_contains($script['body'], 'renderPromptExamples')
+    && str_contains($script['body'], 'promptExamples'));
+check('примеры используют колонки загруженного файла',
+    str_contains($script['body'], 'state.profile && state.profile.columns')
+    || str_contains($script['body'], 'state.profile.columns'),
+    'подстановка колонок не найдена');
 check('в интерфейсе есть просмотр образца', str_contains($script['body'], 'openSample'));
 check('редактора сценария в интерфейсе нет', !str_contains($script['body'], 'openEditor'));
 check('кнопки проверки на образце в библиотеке нет', !str_contains($script['body'], 'data-check'));
@@ -153,6 +172,27 @@ check('карточки библиотеки не шире экрана',
 check('таблица хранения данных оформлена как «параметр — значение»',
     str_contains($script['body'], '<table class="kv"><tr><th>Параметр</th>'));
 
+// Читаемость: текст не мелкий и не бледный. Прежний серый #6b7684 на фоне страницы
+// давал контраст 4,26:1 — ниже порога WCAG AA (4,5:1) для мелкого текста.
+check('пояснительный серый проходит по контрасту',
+    str_contains($style['body'], '--muted: #52606d'),
+    'ожидается #52606d (около 6:1 на фоне страницы)');
+check('кегли заданы переменными, а не жёсткими значениями',
+    str_contains($style['body'], '--fs-base:') && !preg_match('~font-size:\s*\d+px~', $style['body']),
+    'найдены жёсткие font-size в пикселях');
+check('масштаб текста переключается классом на <html>',
+    str_contains($style['body'], 'html.scale-large') && str_contains($style['body'], 'html.scale-xlarge'),
+    'класс должен стоять на :root: значения --fs-* считаются от --scale там, где объявлены');
+check('масштаб не переопределяется на <body>',
+    !preg_match('~body\.scale-(large|xlarge)~', $style['body']),
+    'с классом на <body> кегли --fs-* не менялись');
+check('класс масштаба ставится на documentElement',
+    str_contains($script['body'], 'documentElement.classList') && !str_contains($script['body'], 'document.body.classList'));
+check('в настройках есть выбор размера текста',
+    str_contains($page['body'], 'id="ui-scale"') && str_contains($script['body'], 'applyUiScale'));
+check('таблицы предпросмотра показывают значения целиком, без «…»',
+    str_contains($style['body'], '.table-wrap th,'), 'правило переноса в таблицах не найдено');
+
 // ------------------------------------------------------------------ справка
 
 echo "\nВкладка «Как пользоваться»\n";
@@ -166,6 +206,16 @@ check('первым шагом справки идёт подключение н
     $firstStepAt !== false && $sampleStepAt !== false && $firstStepAt < $sampleStepAt,
     "подключение: {$firstStepAt}, образец: {$sampleStepAt}");
 check('в справке описан запуск на новых файлах', str_contains($page['body'], 'Как запускать сценарий на новых файлах'));
+check('в справке есть каталог типовых задач',
+    str_contains($page['body'], 'Типовые задачи: что можно поручить Макросычу'));
+check('в каталоге задач перечислены частые задачи',
+    str_contains($page['body'], 'Убрать дубликаты')
+    && str_contains($page['body'], 'ABC-анализ')
+    && str_contains($page['body'], 'Подтянуть из прайса (ВПР)')
+    && str_contains($page['body'], 'Промежуточные итоги'));
+check('в справке названы облака для скачивания файлов',
+    str_contains($page['body'], 'Облака Mail.ru') && str_contains($page['body'], 'Яндекс Диска'),
+    'про ссылки облаков в справке не сказано');
 check('в справке есть разбор проблем с подключением', str_contains($page['body'], 'Не подключается к нейросети'));
 check('в справке объяснён случай с антивирусом', str_contains($page['body'], 'Проверка защищённых соединений'));
 check('в справке указан сервис «Напомни-ка!»', str_contains($page['body'], 'napomni-ka.ru'));
@@ -200,9 +250,15 @@ check('сказано, что без нейросети новый сценар�
 check('сказано, что библиотека сценариев при установке пуста',
     substr_count($pageText, 'при установке пуста') >= 3,
     'упоминаний: ' . substr_count($pageText, 'при установке пуста'));
-check('названа рекомендуемая модель upstage/solar-pro4',
-    substr_count($page['body'], 'upstage/solar-pro4') >= 2,
-    'упоминаний: ' . substr_count($page['body'], 'upstage/solar-pro4'));
+check('жёсткой рекомендации одной модели в интерфейсе нет',
+    !str_contains($page['body'], 'upstage/solar-pro4'),
+    'модель меняется у сервисов, поэтому рекомендация снята');
+check('сказано, что модель нужна без режима рассуждений',
+    substr_count($pageText, 'без режима рассуждений') >= 2,
+    'упоминаний: ' . substr_count($pageText, 'без режима рассуждений'));
+check('предложено попробовать несколько моделей',
+    substr_count($pageText, 'попробуйте') >= 2,
+    'упоминаний: ' . substr_count($pageText, 'попробуйте'));
 check('о цене создания сценария сказано в трёх местах (настройки, справка, «О программе»)',
     $priceMentions >= 3, 'упоминаний: ' . $priceMentions);
 check('сказано, что автору платить не нужно, в трёх местах',
@@ -224,8 +280,12 @@ echo "\nСостояние приложения\n";
 $bootstrap = request($base . '/api/?action=bootstrap', $token);
 check('bootstrap доступен с токеном', ($bootstrap['json']['ok'] ?? false) === true,
     (string) ($bootstrap['json']['error'] ?? ''));
-check('каталог операций передан', count($bootstrap['json']['catalog'] ?? []) >= 19,
+check('каталог операций передан', count($bootstrap['json']['catalog'] ?? []) >= 22,
     'операций: ' . count($bootstrap['json']['catalog'] ?? []));
+check('в каталоге есть дубликаты, сортировка и диаграммы',
+    isset($bootstrap['json']['catalog']['dedupe'])
+    && isset($bootstrap['json']['catalog']['sort_rows'])
+    && isset($bootstrap['json']['catalog']['insert_chart']));
 check('в каталоге есть операция ВПР между файлами',
     isset($bootstrap['json']['catalog']['lookup_field']),
     implode(', ', array_keys($bootstrap['json']['catalog'] ?? [])));
@@ -272,6 +332,66 @@ $internal = request($base . '/api/?action=settings.save', $token, [
 check('адрес внутренней сети распознан отдельно',
     ($internal['json']['privacy']['level'] ?? '') === 'private',
     'получено: ' . ($internal['json']['privacy']['level'] ?? ''));
+
+// ------------------------------------------------------------------ ссылки облаков
+
+echo "\nСсылки облаков\n";
+// Живой сервер приложения отдаёт HTML: на нём проверяем, что страница не сохраняется
+// как изображение (именно так появлялись «битые» файлы вместо фото)
+$cloudDir = Paths::tmpDir('cloudcheck');
+Paths::ensure($cloudDir);
+
+$asImage = Http::download($base . '/', $cloudDir . '/страница.jpg', 30, 1);
+check('страница вместо изображения отклоняется',
+    $asImage['success'] === false && str_contains($asImage['error'], 'веб-страница'),
+    $asImage['success'] ? 'сохранилась как файл' : $asImage['error']);
+check('битый файл не создаётся',
+    !is_file($cloudDir . '/страница.jpg'));
+
+$asHtml = Http::download($base . '/', $cloudDir . '/страница.html', 30, 1);
+check('та же страница сохраняется, когда так и просили',
+    $asHtml['success'] === true && is_file($cloudDir . '/страница.html'),
+    $asHtml['error']);
+@unlink($cloudDir . '/страница.html');
+
+check('ссылки облаков распознаются',
+    Http::isCloud('https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ')
+    && Http::isCloud('https://disk.yandex.ru/i/QgQ6fFZ_d6Cp9Q')
+    && !Http::isCloud($base . '/фото/1.jpg'));
+check('идентификатор публичной ссылки Mail.ru разобран',
+    Http::mailRuWeblink('https://cloud.mail.ru/public/7B2u/d9Vu3d4TQ') === '7B2u/d9Vu3d4TQ');
+
+// ------------------------------------------------------------------ размер текста
+
+echo "\nРазмер текста в интерфейсе\n";
+// Значение берём из bootstrap: настройки читает сервер, а не этот процесс
+$uiFirst = request($base . '/api/?action=bootstrap', $token);
+$scaleBefore = (string) ($uiFirst['json']['settings']['ui']['scale'] ?? 'normal');
+
+$uiSaved = request($base . '/api/?action=settings.save', $token, ['ui' => ['scale' => 'xlarge']]);
+check('масштаб текста сохраняется',
+    ($uiSaved['json']['settings']['ui']['scale'] ?? '') === 'xlarge',
+    'получено: ' . ($uiSaved['json']['settings']['ui']['scale'] ?? ''));
+
+$uiBoot = request($base . '/api/?action=bootstrap', $token);
+check('bootstrap отдаёт сохранённый масштаб',
+    ($uiBoot['json']['settings']['ui']['scale'] ?? '') === 'xlarge',
+    'получено: ' . ($uiBoot['json']['settings']['ui']['scale'] ?? ''));
+
+$uiBad = request($base . '/api/?action=settings.save', $token, ['ui' => ['scale' => 'громадный']]);
+check('незнакомый масштаб заменяется обычным',
+    ($uiBad['json']['settings']['ui']['scale'] ?? '') === 'normal',
+    'получено: ' . ($uiBad['json']['settings']['ui']['scale'] ?? ''));
+
+$uiOnly = request($base . '/api/?action=settings.save', $token, ['ui' => ['scale' => 'large']]);
+check('сохранение масштаба не затирает подключение',
+    ($uiOnly['json']['settings']['provider']['model'] ?? '') !== '',
+    'модель: ' . ($uiOnly['json']['settings']['provider']['model'] ?? ''));
+
+$uiBack = request($base . '/api/?action=settings.save', $token, ['ui' => ['scale' => $scaleBefore]]);
+check('масштаб возвращён к исходному',
+    ($uiBack['json']['settings']['ui']['scale'] ?? '') === $scaleBefore,
+    'получено: ' . ($uiBack['json']['settings']['ui']['scale'] ?? ''));
 
 // ------------------------------------------------------------------ библиотека и запуск
 
@@ -482,13 +602,17 @@ foreach ([['1800839', 3], ['1410010', 10], ['9999999', 1]] as $offset => $row) {
 \App\Engine\Excel::save($book, $goodsFile);
 $book->disconnectWorksheets();
 
-$created = request($base . '/api/?action=session.create', $token, [], [
+$created = request($base . '/api/?action=session.create', $token, [
+    'file_mode' => 'lookup',
+], [
     [$goodsFile, 'sample'],
-    [$priceFile, 'lookup'],
+    [$priceFile, 'second'],
 ]);
 
 check('сессия создания приняла два файла', ($created['json']['ok'] ?? false) === true,
     (string) ($created['json']['error'] ?? ''));
+check('задача с двумя файлами помечена как «данные и справочник»',
+    ($created['json']['file_mode'] ?? '') === 'lookup', (string) ($created['json']['file_mode'] ?? ''));
 check('структура файла-справочника определена',
     count($created['json']['lookup_profile']['columns'] ?? []) > 0,
     'колонок: ' . count($created['json']['lookup_profile']['columns'] ?? []));
@@ -548,17 +672,117 @@ if ($savedId !== '') {
     check('файл-справочник скачивается', $download['status'] === 200 && strlen($download['body']) > 1000,
         'код ' . $download['status'] . ', размер: ' . strlen($download['body']));
 
+    // Справочник объявлен во входах, а приложен только основной файл:
+    // сценарий должен остановиться с понятной ошибкой, а не подставить чужой файл
+    $withoutLookup = request($base . '/api/?action=run.start', $token, ['recipe_id' => $savedId], [
+        [$goodsFile, 'file_input'],
+    ]);
+    check('без файла-справочника запуск остановлен',
+        ($withoutLookup['json']['ok'] ?? true) === false
+        && str_contains((string) ($withoutLookup['json']['error'] ?? ''), 'Приложите к запуску файлы'),
+        (string) ($withoutLookup['json']['error'] ?? 'запуск прошёл'));
+
     Store::delete($savedId);
     check('временный сценарий удалён',
         count(array_filter(request($base . '/api/?action=recipes.list', $token)['json']['recipes'] ?? [],
             static fn (array $item) => $item['id'] === $savedId)) === 0);
 }
 
-$single = request($base . '/api/?action=session.create', $token, [], [[$goodsFile, 'sample']]);
+$single = request($base . '/api/?action=session.create', $token, ['file_mode' => 'single'], [[$goodsFile, 'sample']]);
 check('без второго файла сессия тоже создаётся', ($single['json']['ok'] ?? false) === true,
     (string) ($single['json']['error'] ?? ''));
 check('без второго файла профиль справочника пуст',
     ($single['json']['lookup_profile'] ?? null) === null);
+check('задача с одним файлом помечена как «один файл»',
+    ($single['json']['file_mode'] ?? '') === 'single', (string) ($single['json']['file_mode'] ?? ''));
+
+// ------------------------------------------------------------------ один файл в задаче
+
+echo "\nЗадача с одним файлом\n";
+
+$oneSession = (string) ($single['json']['session_id'] ?? '');
+check('сессия с одним файлом создана', $oneSession !== '');
+
+// Сценарий читает таблицу и записывает результат в неё же, но по ошибке модели
+// использует два псевдонима: окно запуска должно просить один файл
+$oneRecipe = [
+    'schema' => 'excelmaster/recipe/1',
+    'name' => 'Проверка одного файла',
+    'description' => 'Читает таблицу и записывает результат в неё же',
+    'steps' => [
+        ['op' => 'read_rows', 'file' => 'input', 'sheet' => 1, 'data_from_row' => 2,
+            'columns' => ['code' => 'A'], 'multi' => 'first', 'skip_if_empty' => ['code']],
+        ['op' => 'write_cells', 'template' => 'template', 'sheet' => 1, 'data_from_row' => 2,
+            'match' => ['column' => 'A', 'field' => 'code'], 'cells' => ['D' => 'code'],
+            'output' => 'один-файл.xlsx'],
+    ],
+];
+
+$dryOne = request($base . '/api/?action=session.dryrun', $token, [
+    'session_id' => $oneSession,
+    'recipe' => $oneRecipe,
+]);
+check('проверка на образце проходит с одним файлом', ($dryOne['json']['ok'] ?? false) === true,
+    (string) ($dryOne['json']['error'] ?? ''));
+
+$savedOne = request($base . '/api/?action=session.save', $token, [
+    'session_id' => $oneSession,
+    'recipe' => $oneRecipe,
+    'name' => 'Проверка одного файла',
+    'description' => 'Временный сценарий проверки',
+    'tags' => ['проверка'],
+]);
+check('сценарий с одним файлом сохранён', ($savedOne['json']['ok'] ?? false) === true,
+    (string) ($savedOne['json']['error'] ?? ''));
+
+$oneId = (string) ($savedOne['json']['recipe_entry']['id'] ?? '');
+if ($oneId !== '') {
+    $oneEntry = request($base . '/api/?action=recipe.get&id=' . urlencode($oneId), $token)['json']['recipe_entry'] ?? [];
+    $oneInputs = (array) (($oneEntry['recipe'] ?? [])['inputs'] ?? []);
+
+    check('сценарий объявил входные файлы', count($oneInputs) === 2, 'входов: ' . count($oneInputs));
+    check('второй псевдоним берёт файл у основного',
+        (string) ($oneInputs[1]['same_as'] ?? '') === 'input',
+        (string) ($oneInputs[1]['same_as'] ?? 'нет'));
+    check('поле файла в окне запуска одно',
+        count(array_filter($oneInputs, static fn (array $item) => !isset($item['same_as']))) === 1,
+        'полей: ' . count(array_filter($oneInputs, static fn (array $item) => !isset($item['same_as']))));
+    check('подпись поля понятна без псевдонима',
+        (string) ($oneInputs[0]['label'] ?? '') === 'Ваша таблица',
+        (string) ($oneInputs[0]['label'] ?? 'нет'));
+
+    // Пользователь прикладывает ОДИН файл, а сценарий получает оба псевдонима
+    $startedOne = request($base . '/api/?action=run.start', $token, ['recipe_id' => $oneId], [
+        [$goodsFile, 'file_input'],
+    ]);
+    $oneJob = (string) ($startedOne['json']['job_id'] ?? '');
+    check('задание с одним файлом запущено', $oneJob !== '',
+        (string) ($startedOne['json']['error'] ?? ''));
+
+    if ($oneJob !== '') {
+        $oneState = '';
+        $oneResult = [];
+        for ($attempt = 0; $attempt < 60; $attempt++) {
+            sleep(1);
+            $oneStatus = request($base . '/api/?action=run.status&job_id=' . urlencode($oneJob), $token);
+            $oneState = (string) ($oneStatus['json']['status']['state'] ?? '');
+            if (in_array($oneState, ['done', 'error'], true)) {
+                $oneResult = $oneStatus['json']['status'];
+                break;
+            }
+        }
+
+        check('одного файла хватило для запуска', $oneState === 'done',
+            'состояние: ' . $oneState . ' ' . (string) ($oneResult['error'] ?? ''));
+        check('результат получен', (int) ($oneResult['summary']['rows'] ?? 0) > 0,
+            'строк: ' . ($oneResult['summary']['rows'] ?? 0));
+    }
+
+    Store::delete($oneId);
+    check('временный сценарий с одним файлом удалён',
+        count(array_filter(request($base . '/api/?action=recipes.list', $token)['json']['recipes'] ?? [],
+            static fn (array $item) => $item['id'] === $oneId)) === 0);
+}
 
 // ------------------------------------------------------------------ подключение к модели
 
